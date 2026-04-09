@@ -1,56 +1,35 @@
 /***************************************************************************
  # SampleCountPass.cs.slang
  #
- # Compute shader that writes a per-pixel R8Uint sample count.
- #
- # Heuristic:
- #   Pixels whose distance from the screen centre is within
- #   (centreRadius * min(width, height)) receive highSamples.
- #   All other pixels receive lowSamples.
+ # Modified: reads importance texture and outputs 1, 2, or 4 samples.
  **************************************************************************/
 
-// ---------------------------------------------------------------------------
-// Constant buffer
-// ---------------------------------------------------------------------------
 cbuffer CB
 {
-    uint2   frameDim;       ///< Frame width and height in pixels.
-    uint    highSamples;    ///< Sample count for centre disc pixels.
-    uint    lowSamples;     ///< Sample count for peripheral pixels.
-    float   centreRadius;   ///< Centre disc radius as fraction of min(w,h).
+    uint2 frameDim;
+    float thresholdLow;     // importance < this -> 1 spp
+    float thresholdHigh;    // importance >= this -> 4 spp, else 2 spp
 };
 
-// ---------------------------------------------------------------------------
-// Output UAV  (R8Uint)
-// ---------------------------------------------------------------------------
+Texture2D<float> gImportance;
 RWTexture2D<uint> gOutput;
 
-// ---------------------------------------------------------------------------
-// Main kernel – one thread per pixel
-// ---------------------------------------------------------------------------
 [numthreads(16, 16, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 pixel = dispatchThreadId.xy;
-
-    // Discard threads outside the frame.
     if (any(pixel >= frameDim))
         return;
 
-    // Compute the distance from the pixel to the screen centre.
-    float2 centre   = float2(frameDim) * 0.5f;
-    float2 offset   = float2(pixel) + 0.5f - centre; // use pixel centre
-    float  dist     = length(offset);
+    float imp = gImportance[pixel];
 
-    // Disc radius in pixels.
-    float  minDim   = (float)min(frameDim.x, frameDim.y);
-    float  radiusPx = centreRadius * minDim;
-
-    // Choose sample count.
-    uint count = (dist <= radiusPx) ? highSamples : lowSamples;
-
-    // Clamp to [1, 255] to satisfy R8Uint and PathTracer's expectations.
-    count = clamp(count, 1u, 255u);
+    uint count;
+    if (imp < thresholdLow)
+        count = 1u;
+    else if (imp < thresholdHigh)
+        count = 2u;
+    else
+        count = 4u;
 
     gOutput[pixel] = count;
 }

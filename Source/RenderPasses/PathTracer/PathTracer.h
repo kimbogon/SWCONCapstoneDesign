@@ -43,6 +43,14 @@
 using namespace Falcor;
 
 /** Fast path tracer.
+ *
+ *  [Adaptive sampling note]
+ *  Variable per-pixel sample count is already supported via the optional
+ *  "sampleCount" (R8Uint) input.  When connected, mFixedSampleCount becomes
+ *  false and the shader reads the per-pixel count from the texture.
+ *  No structural changes are needed in PathTracer for the importance-based
+ *  adaptive pipeline; only the upstream passes (ImportancePass, SampleCountPass)
+ *  need to produce the texture.
 */
 class PathTracer : public RenderPass
 {

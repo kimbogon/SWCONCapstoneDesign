@@ -25,6 +25,18 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
+
+/*
+ * [Adaptive sampling note]
+ * This file is structurally identical to the original PathTracer.cpp.
+ * The variable-sample-count pathway already exists:
+ *   - kInputSampleCount ("sampleCount") is an optional R8Uint input.
+ *   - When connected, mFixedSampleCount = false and SAMPLES_PER_PIXEL define
+ *     is set to 0 so the shader reads per-pixel counts from the texture.
+ *   - generatePaths / tracePass / resolvePass all handle the variable case.
+ * No code changes are required for the importance-based adaptive pipeline.
+ */
+
 #include "PathTracer.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
@@ -42,6 +54,7 @@ namespace
     const std::string kInputVBuffer = "vbuffer";
     const std::string kInputMotionVectors = "mvec";
     const std::string kInputViewDir = "viewW";
+    // [Adaptive] This input receives the per-pixel sample count from SampleCountPass.
     const std::string kInputSampleCount = "sampleCount";
 
     const Falcor::ChannelList kInputChannels =
@@ -49,6 +62,7 @@ namespace
         { kInputVBuffer,        "gVBuffer",         "Visibility buffer in packed format" },
         { kInputMotionVectors,  "gMotionVectors",   "Motion vector buffer (float format)", true /* optional */ },
         { kInputViewDir,        "gViewW",           "World-space view direction (xyz float format)", true /* optional */ },
+        // [Adaptive] R8Uint sample count — optional; when absent, fixed spp is used.
         { kInputSampleCount,    "gSampleCount",     "Sample count buffer (integer format)", true /* optional */, ResourceFormat::R8Uint },
     };
 
@@ -190,8 +204,6 @@ PathTracer::PathTracer(ref<Device> pDevice, const Properties& props)
     auto defines = mStaticParams.getDefines(*this);
     mpResolvePass = ComputePass::create(mpDevice, ProgramDesc().addShaderLibrary(kResolvePassFilename).csEntry("main"), defines, false);
 
-    // Note: The other programs are lazily created in updatePrograms() because a scene needs to be present when creating them.
-
     mpPixelStats = std::make_unique<PixelStats>(mpDevice);
     mpPixelDebug = std::make_unique<PixelDebug>(mpDevice);
 }
@@ -212,14 +224,12 @@ void PathTracer::parseProperties(const Properties& props)
 {
     for (const auto& [key, value] : props)
     {
-        // Rendering parameters
         if (key == kSamplesPerPixel) mStaticParams.samplesPerPixel = value;
         else if (key == kMaxSurfaceBounces) mStaticParams.maxSurfaceBounces = value;
         else if (key == kMaxDiffuseBounces) mStaticParams.maxDiffuseBounces = value;
         else if (key == kMaxSpecularBounces) mStaticParams.maxSpecularBounces = value;
         else if (key == kMaxTransmissionBounces) mStaticParams.maxTransmissionBounces = value;
 
-        // Sampling parameters
         else if (key == kSampleGenerator) mStaticParams.sampleGenerator = value;
         else if (key == kFixedSeed) { mParams.fixedSeed = value; mParams.useFixedSeed = true; }
         else if (key == kUseBSDFSampling) mStaticParams.useBSDFSampling = value;
@@ -233,7 +243,6 @@ void PathTracer::parseProperties(const Properties& props)
         else if (key == kUseRTXDI) mStaticParams.useRTXDI = value;
         else if (key == kRTXDIOptions) mRTXDIOptions = value;
 
-        // Material parameters
         else if (key == kUseAlphaTest) mStaticParams.useAlphaTest = value;
         else if (key == kAdjustShadingNormals) mStaticParams.adjustShadingNormals = value;
         else if (key == kMaxNestedMaterials) mStaticParams.maxNestedMaterials = value;
@@ -243,13 +252,10 @@ void PathTracer::parseProperties(const Properties& props)
         else if (key == kPrimaryLodMode) mStaticParams.primaryLodMode = value;
         else if (key == kLODBias) mParams.lodBias = value;
 
-        // Denoising parameters
         else if (key == kUseNRDDemodulation) mStaticParams.useNRDDemodulation = value;
 
-        // Scheduling parameters
         else if (key == kUseSER) mStaticParams.useSER = value;
 
-        // Output parameters
         else if (key == kOutputSize) mOutputSizeSelection = value;
         else if (key == kFixedOutputSize) mFixedOutputSize = value;
         else if (key == kColorFormat) mStaticParams.colorFormat = value;
@@ -259,14 +265,12 @@ void PathTracer::parseProperties(const Properties& props)
 
     if (props.has(kMaxSurfaceBounces))
     {
-        // Initialize bounce counts to 'maxSurfaceBounces' if they weren't explicitly set.
         if (!props.has(kMaxDiffuseBounces)) mStaticParams.maxDiffuseBounces = mStaticParams.maxSurfaceBounces;
         if (!props.has(kMaxSpecularBounces)) mStaticParams.maxSpecularBounces = mStaticParams.maxSurfaceBounces;
         if (!props.has(kMaxTransmissionBounces)) mStaticParams.maxTransmissionBounces = mStaticParams.maxSurfaceBounces;
     }
     else
     {
-        // Initialize surface bounces.
         mStaticParams.maxSurfaceBounces = std::max(mStaticParams.maxDiffuseBounces, std::max(mStaticParams.maxSpecularBounces, mStaticParams.maxTransmissionBounces));
     }
 
@@ -275,7 +279,6 @@ void PathTracer::parseProperties(const Properties& props)
         mStaticParams.maxSurfaceBounces < mStaticParams.maxSpecularBounces ||
         mStaticParams.maxSurfaceBounces < mStaticParams.maxTransmissionBounces;
 
-    // Show a warning if maxSurfaceBounces will be adjusted in validateOptions().
     if (props.has(kMaxSurfaceBounces) && maxSurfaceBouncesNeedsAdjustment)
     {
         logWarning("'{}' is set lower than '{}', '{}' or '{}' and will be increased.", kMaxSurfaceBounces, kMaxDiffuseBounces, kMaxSpecularBounces, kMaxTransmissionBounces);
@@ -290,7 +293,6 @@ void PathTracer::validateOptions()
         mParams.specularRoughnessThreshold = std::clamp(mParams.specularRoughnessThreshold, 0.f, 1.f);
     }
 
-    // Static parameters.
     if (mStaticParams.samplesPerPixel < 1 || mStaticParams.samplesPerPixel > kMaxSamplesPerPixel)
     {
         logWarning("'samplesPerPixel' must be in the range [1, {}]. Clamping to this range.", kMaxSamplesPerPixel);
@@ -311,7 +313,6 @@ void PathTracer::validateOptions()
     clampBounces(mStaticParams.maxSpecularBounces, kMaxSpecularBounces);
     clampBounces(mStaticParams.maxTransmissionBounces, kMaxTransmissionBounces);
 
-    // Make sure maxSurfaceBounces is at least as many as any of diffuse, specular or transmission.
     uint32_t minSurfaceBounces = std::max(mStaticParams.maxDiffuseBounces, std::max(mStaticParams.maxSpecularBounces, mStaticParams.maxTransmissionBounces));
     mStaticParams.maxSurfaceBounces = std::max(mStaticParams.maxSurfaceBounces, minSurfaceBounces);
 
@@ -337,14 +338,12 @@ Properties PathTracer::getProperties() const
 
     Properties props;
 
-    // Rendering parameters
     props[kSamplesPerPixel] = mStaticParams.samplesPerPixel;
     props[kMaxSurfaceBounces] = mStaticParams.maxSurfaceBounces;
     props[kMaxDiffuseBounces] = mStaticParams.maxDiffuseBounces;
     props[kMaxSpecularBounces] = mStaticParams.maxSpecularBounces;
     props[kMaxTransmissionBounces] = mStaticParams.maxTransmissionBounces;
 
-    // Sampling parameters
     props[kSampleGenerator] = mStaticParams.sampleGenerator;
     if (mParams.useFixedSeed) props[kFixedSeed] = mParams.fixedSeed;
     props[kUseBSDFSampling] = mStaticParams.useBSDFSampling;
@@ -358,7 +357,6 @@ Properties PathTracer::getProperties() const
     props[kUseRTXDI] = mStaticParams.useRTXDI;
     props[kRTXDIOptions] = mRTXDIOptions;
 
-    // Material parameters
     props[kUseAlphaTest] = mStaticParams.useAlphaTest;
     props[kAdjustShadingNormals] = mStaticParams.adjustShadingNormals;
     props[kMaxNestedMaterials] = mStaticParams.maxNestedMaterials;
@@ -368,13 +366,10 @@ Properties PathTracer::getProperties() const
     props[kPrimaryLodMode] = mStaticParams.primaryLodMode;
     props[kLODBias] = mParams.lodBias;
 
-    // Denoising parameters
     props[kUseNRDDemodulation] = mStaticParams.useNRDDemodulation;
 
-    // Scheduling parameters
     props[kUseSER] = mStaticParams.useSER;
 
-    // Output parameters
     props[kOutputSize] = mOutputSizeSelection;
     if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed) props[kFixedOutputSize] = mFixedOutputSize;
     props[kColorFormat] = mStaticParams.colorFormat;
@@ -403,7 +398,6 @@ void PathTracer::setFrameDim(const uint2 frameDim)
         FALCOR_THROW("Frame dimensions up to {} pixels width/height are supported.", kMaxFrameDimension);
     }
 
-    // Tile dimensions have to be powers-of-two.
     FALCOR_ASSERT(isPowerOf2(kScreenTileDim.x) && isPowerOf2(kScreenTileDim.y));
     FALCOR_ASSERT(kScreenTileDim.x == (1 << kScreenTileBits.x) && kScreenTileDim.y == (1 << kScreenTileBits.y));
     mParams.screenTiles = div_round_up(mParams.frameDim, kScreenTileDim);
@@ -424,7 +418,6 @@ void PathTracer::setScene(RenderContext* pRenderContext, const ref<Scene>& pScen
     mParams.frameDim = {};
     mParams.screenTiles = {};
 
-    // Need to recreate the RTXDI module when the scene changes.
     mpRTXDI = nullptr;
 
     resetPrograms();
@@ -448,31 +441,23 @@ void PathTracer::execute(RenderContext* pRenderContext, const RenderData& render
 {
     if (!beginFrame(pRenderContext, renderData)) return;
 
-    // Update shader program specialization.
     updatePrograms();
 
-    // Prepare resources.
     prepareResources(pRenderContext, renderData);
 
-    // Prepare the path tracer parameter block.
-    // This should be called after all resources have been created.
     preparePathTracer(renderData);
 
-    // Generate paths at primary hits.
     generatePaths(pRenderContext, renderData);
 
-    // Update RTXDI.
     if (mpRTXDI)
     {
         const auto& pMotionVectors = renderData.getTexture(kInputMotionVectors);
         mpRTXDI->update(pRenderContext, pMotionVectors);
     }
 
-    // Trace pass.
     FALCOR_ASSERT(mpTracePass);
     tracePass(pRenderContext, renderData, *mpTracePass);
 
-    // Launch separate passes to trace delta reflection and transmission paths to generate respective guide buffers.
     if (mOutputNRDAdditionalData)
     {
         FALCOR_ASSERT(mpTraceDeltaReflectionPass && mpTraceDeltaTransmissionPass);
@@ -480,7 +465,6 @@ void PathTracer::execute(RenderContext* pRenderContext, const RenderData& render
         tracePass(pRenderContext, renderData, *mpTraceDeltaTransmissionPass);
     }
 
-    // Resolve pass.
     resolvePass(pRenderContext, renderData);
 
     endFrame(pRenderContext, renderData);
@@ -490,10 +474,8 @@ void PathTracer::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
 
-    // Rendering options.
     dirty |= renderRenderingUI(widget);
 
-    // Stats and debug options.
     renderStatsUI(widget);
     dirty |= renderDebugUI(widget);
 
@@ -519,7 +501,6 @@ bool PathTracer::renderRenderingUI(Gui::Widgets& widget)
 
     if (widget.var("Max surface bounces", mStaticParams.maxSurfaceBounces, 0u, kMaxBounces))
     {
-        // Allow users to change the max surface bounce parameter in the UI to clamp all other surface bounce parameters.
         mStaticParams.maxDiffuseBounces = std::min(mStaticParams.maxDiffuseBounces, mStaticParams.maxSurfaceBounces);
         mStaticParams.maxSpecularBounces = std::min(mStaticParams.maxSpecularBounces, mStaticParams.maxSurfaceBounces);
         mStaticParams.maxTransmissionBounces = std::min(mStaticParams.maxTransmissionBounces, mStaticParams.maxSurfaceBounces);
@@ -536,8 +517,6 @@ bool PathTracer::renderRenderingUI(Gui::Widgets& widget)
 
     dirty |= widget.var("Max transmission bounces", mStaticParams.maxTransmissionBounces, 0u, kMaxBounces);
     widget.tooltip("Maximum number of transmission bounces.\n0 = no transmission\n1 = one transmission bounce etc.");
-
-    // Sampling options.
 
     if (widget.dropdown("Sample generator", SampleGenerator::getGuiDropdownList(), mStaticParams.sampleGenerator))
     {
@@ -637,11 +616,8 @@ bool PathTracer::renderRenderingUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("Output options"))
     {
-        // Switch to enable/disable path tracer output.
         dirty |= widget.checkbox("Enable output", mEnabled);
 
-        // Controls for output size.
-        // When output size requirements change, we'll trigger a graph recompile to update the render pass I/O sizes.
         if (widget.dropdown("Output size", mOutputSizeSelection)) requestRecompile();
         if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed)
         {
@@ -680,7 +656,6 @@ void PathTracer::renderStatsUI(Gui::Widgets& widget)
 {
     if (auto g = widget.group("Statistics"))
     {
-        // Show ray stats
         mpPixelStats->renderUI(g);
     }
 }
@@ -709,51 +684,40 @@ PathTracer::TracePass::TracePass(ref<Device> pDevice, const std::string& name, c
     desc.addShaderLibrary(kTracePassFilename);
     if (pDevice->getType() == Device::Type::D3D12 && useSER)
         desc.addCompilerArguments({ "-Xdxc", "-enable-lifetime-markers" });
-    desc.setMaxPayloadSize(160); // This is conservative but the required minimum is 140 bytes.
+    desc.setMaxPayloadSize(160);
     desc.setMaxAttributeSize(pScene->getRaytracingMaxAttributeSize());
     desc.setMaxTraceRecursionDepth(1);
     if (!pScene->hasProceduralGeometry()) desc.setRtPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
 
-    // Create ray tracing binding table.
     pBindingTable = RtBindingTable::create(1, 1, pScene->getGeometryCount());
 
-    // Specify entry point for raygen and miss shaders.
-    // The raygen shader needs type conformances for *all* materials in the scene.
-    // The miss shader doesn't need need any type conformances because it does not use materials.
     pBindingTable->setRayGen(desc.addRayGen("rayGen", globalTypeConformances));
     pBindingTable->setMiss(kMissScatter, desc.addMiss("scatterMiss"));
 
-    // Specify hit group entry points for every combination of geometry and material type.
-    // The code for each hit group gets specialized for the actual types it's operating on.
-    // First query which material types the scene has.
     auto materialTypes = pScene->getMaterialSystem().getMaterialTypes();
 
     for (const auto materialType : materialTypes)
     {
         auto typeConformances = pScene->getMaterialSystem().getTypeConformances(materialType);
 
-        // Add hit groups for triangles.
         if (auto geometryIDs = pScene->getGeometryIDs(Scene::GeometryType::TriangleMesh, materialType); !geometryIDs.empty())
         {
             auto shaderID = desc.addHitGroup("scatterTriangleClosestHit", "scatterTriangleAnyHit", "", typeConformances, to_string(materialType));
             pBindingTable->setHitGroup(kRayTypeScatter, geometryIDs, shaderID);
         }
 
-        // Add hit groups for displaced triangle meshes.
         if (auto geometryIDs = pScene->getGeometryIDs(Scene::GeometryType::DisplacedTriangleMesh, materialType); !geometryIDs.empty())
         {
             auto shaderID = desc.addHitGroup("scatterDisplacedTriangleMeshClosestHit", "", "displacedTriangleMeshIntersection", typeConformances, to_string(materialType));
             pBindingTable->setHitGroup(kRayTypeScatter, geometryIDs, shaderID);
         }
 
-        // Add hit groups for curves.
         if (auto geometryIDs = pScene->getGeometryIDs(Scene::GeometryType::Curve, materialType); !geometryIDs.empty())
         {
             auto shaderID = desc.addHitGroup("scatterCurveClosestHit", "", "curveIntersection", typeConformances, to_string(materialType));
             pBindingTable->setHitGroup(kRayTypeScatter, geometryIDs, shaderID);
         }
 
-        // Add hit groups for SDF grids.
         if (auto geometryIDs = pScene->getGeometryIDs(Scene::GeometryType::SDFGrid, materialType); !geometryIDs.empty())
         {
             auto shaderID = desc.addHitGroup("scatterSdfGridClosestHit", "", "sdfGridIntersection", typeConformances, to_string(materialType));
@@ -790,22 +754,15 @@ void PathTracer::updatePrograms()
 
     if (mRecompile == false) return;
 
-    // If we get here, a change that require recompilation of shader programs has occurred.
-    // This may be due to change of scene defines, type conformances, shader modules, or other changes that require recompilation.
-    // When type conformances and/or shader modules change, the programs need to be recreated. We assume programs have been reset upon such changes.
-    // When only defines have changed, it is sufficient to update the existing programs and recreate the program vars.
-
     auto defines = mStaticParams.getDefines(*this);
     TypeConformanceList globalTypeConformances;
     mpScene->getTypeConformances(globalTypeConformances);
 
-    // Create trace pass.
     if (!mpTracePass)
         mpTracePass = TracePass::create(mpDevice, "tracePass", "", mpScene, defines, globalTypeConformances);
 
     mpTracePass->prepareProgram(mpDevice, defines);
 
-    // Create specialized trace passes.
     if (mOutputNRDAdditionalData)
     {
         if (!mpTraceDeltaReflectionPass)
@@ -817,7 +774,6 @@ void PathTracer::updatePrograms()
         mpTraceDeltaTransmissionPass->prepareProgram(mpDevice, defines);
     }
 
-    // Create compute passes.
     ProgramDesc baseDesc;
     mpScene->getShaderModules(baseDesc.shaderModules);
     baseDesc.addTypeConformances(globalTypeConformances);
@@ -837,11 +793,7 @@ void PathTracer::updatePrograms()
 
     auto preparePass = [&](ref<ComputePass> pass)
     {
-        // Note that we must use set instead of add defines to replace any stale state.
         pass->getProgram()->setDefines(defines);
-
-        // Recreate program vars. This may trigger recompilation if needed.
-        // Note that program versions are cached, so switching to a previously used specialization is faster.
         pass->setVars(nullptr);
     };
     preparePass(mpGeneratePaths);
@@ -854,18 +806,12 @@ void PathTracer::updatePrograms()
 
 void PathTracer::prepareResources(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    // Compute allocation requirements for paths and output samples.
-    // Note that the sample buffers are padded to whole tiles, while the max path count depends on actual frame dimension.
-    // If we don't have a fixed sample count, assume the worst case.
     uint32_t spp = mFixedSampleCount ? mStaticParams.samplesPerPixel : kMaxSamplesPerPixel;
     uint32_t tileCount = mParams.screenTiles.x * mParams.screenTiles.y;
     const uint32_t sampleCount = tileCount * kScreenTileDim.x * kScreenTileDim.y * spp;
     const uint32_t screenPixelCount = mParams.frameDim.x * mParams.frameDim.y;
     const uint32_t pathCount = screenPixelCount * spp;
 
-    // Allocate output sample offset buffer if needed.
-    // This buffer stores the output offset to where the samples for each pixel are stored consecutively.
-    // The offsets are local to the current tile, so 16-bit format is sufficient and reduces bandwidth usage.
     if (!mFixedSampleCount)
     {
         if (!mpSampleOffset || mpSampleOffset->getWidth() != mParams.frameDim.x || mpSampleOffset->getHeight() != mParams.frameDim.y)
@@ -878,8 +824,6 @@ void PathTracer::prepareResources(RenderContext* pRenderContext, const RenderDat
 
     auto var = mpReflectTypes->getRootVar();
 
-    // Allocate per-sample buffers.
-    // For the special case of fixed 1 spp, the output is written out directly and this buffer is not needed.
     if (!mFixedSampleCount || mStaticParams.samplesPerPixel > 1)
     {
         if (!mpSampleColor || mpSampleColor->getElementCount() < sampleCount || mVarsChanged)
@@ -908,7 +852,6 @@ void PathTracer::prepareResources(RenderContext* pRenderContext, const RenderDat
 
 void PathTracer::preparePathTracer(const RenderData& renderData)
 {
-    // Create path tracer parameter block if needed.
     if (!mpPathTracerBlock || mVarsChanged)
     {
         auto reflector = mpReflectTypes->getProgram()->getReflector()->getParameterBlock("pathTracer");
@@ -917,14 +860,12 @@ void PathTracer::preparePathTracer(const RenderData& renderData)
         mVarsChanged = true;
     }
 
-    // Bind resources.
     auto var = mpPathTracerBlock->getRootVar();
     bindShaderData(var, renderData);
 }
 
 void PathTracer::resetLighting()
 {
-    // Retain the options for the emissive sampler.
     if (auto lightBVHSampler = dynamic_cast<LightBVHSampler*>(mpEmissiveSampler.get()))
     {
         mLightBVHOptions = lightBVHSampler->getOptions();
@@ -937,10 +878,6 @@ void PathTracer::resetLighting()
 
 void PathTracer::prepareMaterials(RenderContext* pRenderContext)
 {
-    // This functions checks for scene changes that require shader recompilation.
-    // Whenever materials or geometry is added/removed to the scene, we reset the shader programs to trigger
-    // recompilation with the correct defines, type conformances, shader modules, and binding table.
-
     if (is_set(mUpdateFlags, IScene::UpdateFlags::RecompileNeeded) ||
         is_set(mUpdateFlags, IScene::UpdateFlags::GeometryChanged))
     {
@@ -989,7 +926,6 @@ bool PathTracer::prepareLighting(RenderContext* pRenderContext)
         }
     }
 
-    // Request the light collection if emissive lights are enabled.
     if (mpScene->getRenderSettings().useEmissiveLights)
     {
         mpScene->getILightCollection(pRenderContext);
@@ -1025,7 +961,6 @@ bool PathTracer::prepareLighting(RenderContext* pRenderContext)
     {
         if (mpEmissiveSampler)
         {
-            // Retain the options for the emissive sampler.
             if (auto lightBVHSampler = dynamic_cast<LightBVHSampler*>(mpEmissiveSampler.get()))
             {
                 mLightBVHOptions = lightBVHSampler->getOptions();
@@ -1053,7 +988,6 @@ void PathTracer::prepareRTXDI(RenderContext* pRenderContext)
     {
         if (!mpRTXDI) mpRTXDI = std::make_unique<RTXDI>(mpScene, mRTXDIOptions);
 
-        // Emit warning if enabled while using spp != 1.
         if (!mFixedSampleCount || mStaticParams.samplesPerPixel != 1)
         {
             logWarning("Using RTXDI with samples/pixel != 1 will only generate one RTXDI sample reused for all pixel samples.");
@@ -1089,17 +1023,15 @@ void PathTracer::setNRDData(const ShaderVar& var, const RenderData& renderData) 
 
 void PathTracer::bindShaderData(const ShaderVar& var, const RenderData& renderData, bool useLightSampling) const
 {
-    // Bind static resources that don't change per frame.
     if (mVarsChanged)
     {
         if (useLightSampling && mpEnvMapSampler) mpEnvMapSampler->bindShaderData(var["envMapSampler"]);
 
-        var["sampleOffset"] = mpSampleOffset; // Can be nullptr
+        var["sampleOffset"] = mpSampleOffset;
         var["sampleColor"] = mpSampleColor;
         var["sampleGuideData"] = mpSampleGuideData;
     }
 
-    // Bind runtime data.
     setNRDData(var["outputNRD"], renderData);
 
     ref<Texture> pViewDir;
@@ -1118,13 +1050,12 @@ void PathTracer::bindShaderData(const ShaderVar& var, const RenderData& renderDa
 
     var["params"].setBlob(mParams);
     var["vbuffer"] = renderData.getTexture(kInputVBuffer);
-    var["viewDir"] = pViewDir; // Can be nullptr
-    var["sampleCount"] = pSampleCount; // Can be nullptr
+    var["viewDir"] = pViewDir;
+    var["sampleCount"] = pSampleCount;
     var["outputColor"] = renderData.getTexture(kOutputColor);
 
     if (useLightSampling && mpEmissiveSampler)
     {
-        // TODO: Do we have to bind this every frame?
         mpEmissiveSampler->bindShaderData(var["emissiveSampler"]);
     }
 }
@@ -1134,11 +1065,8 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
     const auto& pOutputColor = renderData.getTexture(kOutputColor);
     FALCOR_ASSERT(pOutputColor);
 
-    // Set output frame dimension.
     setFrameDim(uint2(pOutputColor->getWidth(), pOutputColor->getHeight()));
 
-    // Validate all I/O sizes match the expected size.
-    // If not, we'll disable the path tracer to give the user a chance to fix the configuration before re-enabling it.
     bool resolutionMismatch = false;
     auto validateChannels = [&](const auto& channels) {
         for (const auto& channel : channels)
@@ -1160,8 +1088,6 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
     {
         pRenderContext->clearUAV(pOutputColor->getUAV().get(), float4(0.f));
 
-        // Set refresh flag if changes that affect the output have occured.
-        // This is needed to ensure other passes get notified when the path tracer is enabled/disabled.
         if (mOptionsChanged)
         {
             auto& dict = renderData.getDictionary();
@@ -1173,17 +1099,13 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
         return false;
     }
 
-    // Update materials.
     prepareMaterials(pRenderContext);
 
-    // Update the env map and emissive sampler to the current frame.
     bool lightingChanged = prepareLighting(pRenderContext);
 
-    // Prepare RTXDI.
     prepareRTXDI(pRenderContext);
     if (mpRTXDI) mpRTXDI->beginFrame(pRenderContext, mParams.frameDim);
 
-    // Update refresh flag if changes that affect the output have occured.
     auto& dict = renderData.getDictionary();
     if (mOptionsChanged || lightingChanged)
     {
@@ -1194,7 +1116,6 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
         mOptionsChanged = false;
     }
 
-    // Check if GBuffer has adjusted shading normals enabled.
     bool gbufferAdjustShadingNormals = dict.getValue(Falcor::kRenderPassGBufferAdjustShadingNormals, false);
     if (gbufferAdjustShadingNormals != mGBufferAdjustShadingNormals)
     {
@@ -1202,15 +1123,13 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
         mRecompile = true;
     }
 
-    // Check if fixed sample count should be used. When the sample count input is connected we load the count from there instead.
+    // [Adaptive] When sampleCount input is connected, use variable sample count mode.
     mFixedSampleCount = renderData[kInputSampleCount] == nullptr;
 
-    // Check if guide data should be generated.
     mOutputGuideData = renderData[kOutputAlbedo] != nullptr || renderData[kOutputSpecularAlbedo] != nullptr
         || renderData[kOutputIndirectAlbedo] != nullptr || renderData[kOutputGuideNormal] != nullptr
         || renderData[kOutputReflectionPosW] != nullptr;
 
-    // Check if NRD data should be generated.
     mOutputNRDData =
         renderData[kOutputNRDDiffuseRadianceHitDist] != nullptr
         || renderData[kOutputNRDSpecularRadianceHitDist] != nullptr
@@ -1219,7 +1138,6 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
         || renderData[kOutputNRDDiffuseReflectance] != nullptr
         || renderData[kOutputNRDSpecularReflectance] != nullptr;
 
-    // Check if additional NRD data should be generated.
     bool prevOutputNRDAdditionalData = mOutputNRDAdditionalData;
     mOutputNRDAdditionalData =
         renderData[kOutputNRDDeltaReflectionRadianceHitDist] != nullptr
@@ -1236,7 +1154,6 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
         || renderData[kOutputNRDDeltaTransmissionPosW] != nullptr;
     if (mOutputNRDAdditionalData != prevOutputNRDAdditionalData) mRecompile = true;
 
-    // Enable pixel stats if rayCount or pathLength outputs are connected.
     if (renderData[kOutputRayCount] != nullptr || renderData[kOutputPathLength] != nullptr)
     {
         mpPixelStats->setEnabled(true);
@@ -1245,7 +1162,6 @@ bool PathTracer::beginFrame(RenderContext* pRenderContext, const RenderData& ren
     mpPixelStats->beginFrame(pRenderContext, mParams.frameDim);
     mpPixelDebug->beginFrame(pRenderContext, mParams.frameDim);
 
-    // Update the random seed.
     mParams.seed = mParams.useFixedSeed ? mParams.fixedSeed : mParams.frameCount;
 
     mUpdateFlags = IScene::UpdateFlags::None;
@@ -1273,7 +1189,6 @@ void PathTracer::endFrame(RenderContext* pRenderContext, const RenderData& rende
         }
     };
 
-    // Copy pixel stats to outputs if available.
     copyTexture(renderData.getTexture(kOutputRayCount).get(), mpPixelStats->getRayCountTexture(pRenderContext).get());
     copyTexture(renderData.getTexture(kOutputPathLength).get(), mpPixelStats->getPathLengthTexture().get());
 
@@ -1287,21 +1202,17 @@ void PathTracer::generatePaths(RenderContext* pRenderContext, const RenderData& 
 {
     FALCOR_PROFILE(pRenderContext, "generatePaths");
 
-    // Check shader assumptions.
-    // We launch one thread group per screen tile, with threads linearly indexed.
     const uint32_t tileSize = kScreenTileDim.x * kScreenTileDim.y;
-    FALCOR_ASSERT(kScreenTileDim.x == 16 && kScreenTileDim.y == 16); // TODO: Remove this temporary limitation when Slang bug has been fixed, see comments in shader.
-    FALCOR_ASSERT(kScreenTileBits.x <= 4 && kScreenTileBits.y <= 4); // Since we use 8-bit deinterleave.
+    FALCOR_ASSERT(kScreenTileDim.x == 16 && kScreenTileDim.y == 16);
+    FALCOR_ASSERT(kScreenTileBits.x <= 4 && kScreenTileBits.y <= 4);
     FALCOR_ASSERT(mpGeneratePaths->getThreadGroupSize().x == tileSize);
     FALCOR_ASSERT(mpGeneratePaths->getThreadGroupSize().y == 1 && mpGeneratePaths->getThreadGroupSize().z == 1);
 
-    // Additional specialization. This shouldn't change resource declarations.
     mpGeneratePaths->addDefine("USE_VIEW_DIR", (mpScene->getCamera()->getApertureRadius() > 0 && renderData[kInputViewDir] != nullptr) ? "1" : "0");
     mpGeneratePaths->addDefine("OUTPUT_GUIDE_DATA", mOutputGuideData ? "1" : "0");
     mpGeneratePaths->addDefine("OUTPUT_NRD_DATA", mOutputNRDData ? "1" : "0");
     mpGeneratePaths->addDefine("OUTPUT_NRD_ADDITIONAL_DATA", mOutputNRDAdditionalData ? "1" : "0");
 
-    // Bind resources.
     auto var = mpGeneratePaths->getRootVar()["CB"]["gPathGenerator"];
     bindShaderData(var, renderData, false);
 
@@ -1309,8 +1220,6 @@ void PathTracer::generatePaths(RenderContext* pRenderContext, const RenderData& 
 
     if (mpRTXDI) mpRTXDI->bindShaderData(mpGeneratePaths->getRootVar());
 
-    // Launch one thread per pixel.
-    // The dimensions are padded to whole tiles to allow re-indexing the threads in the shader.
     mpGeneratePaths->execute(pRenderContext, { mParams.screenTiles.x * tileSize, mParams.screenTiles.y, 1u });
 }
 
@@ -1320,13 +1229,11 @@ void PathTracer::tracePass(RenderContext* pRenderContext, const RenderData& rend
 
     FALCOR_ASSERT(tracePass.pProgram != nullptr && tracePass.pBindingTable != nullptr && tracePass.pVars != nullptr);
 
-    // Additional specialization. This shouldn't change resource declarations.
     tracePass.pProgram->addDefine("USE_VIEW_DIR", (mpScene->getCamera()->getApertureRadius() > 0 && renderData[kInputViewDir] != nullptr) ? "1" : "0");
     tracePass.pProgram->addDefine("OUTPUT_GUIDE_DATA", mOutputGuideData ? "1" : "0");
     tracePass.pProgram->addDefine("OUTPUT_NRD_DATA", mOutputNRDData ? "1" : "0");
     tracePass.pProgram->addDefine("OUTPUT_NRD_ADDITIONAL_DATA", mOutputNRDAdditionalData ? "1" : "0");
 
-    // Bind global resources.
     auto var = tracePass.pVars->getRootVar();
 
     if (mVarsChanged) mpSampleGenerator->bindShaderData(var);
@@ -1335,10 +1242,8 @@ void PathTracer::tracePass(RenderContext* pRenderContext, const RenderData& rend
     mpPixelStats->prepareProgram(tracePass.pProgram, var);
     mpPixelDebug->prepareProgram(tracePass.pProgram, var);
 
-    // Bind the path tracer.
     var["gPathTracer"] = mpPathTracerBlock;
 
-    // Full screen dispatch.
     mpScene->raytrace(pRenderContext, tracePass.pProgram.get(), tracePass.pVars, uint3(mParams.frameDim, 1));
 }
 
@@ -1348,20 +1253,12 @@ void PathTracer::resolvePass(RenderContext* pRenderContext, const RenderData& re
 
     FALCOR_PROFILE(pRenderContext, "resolvePass");
 
-    // This pass is executed when multiple samples per pixel are used.
-    // We launch one thread per pixel that computes the resolved color by iterating over the samples.
-    // The samples are arranged in tiles with pixels in Morton order, with samples stored consecutively for each pixel.
-    // With adaptive sampling, an extra sample offset lookup table computed by the path generation pass is used to
-    // locate the samples for each pixel.
-
-    // Additional specialization. This shouldn't change resource declarations.
     mpResolvePass->addDefine("OUTPUT_GUIDE_DATA", mOutputGuideData ? "1" : "0");
     mpResolvePass->addDefine("OUTPUT_NRD_DATA", mOutputNRDData ? "1" : "0");
 
-    // Bind resources.
     auto var = mpResolvePass->getRootVar()["CB"]["gResolvePass"];
     var["params"].setBlob(mParams);
-    var["sampleCount"] = renderData.getTexture(kInputSampleCount); // Can be nullptr
+    var["sampleCount"] = renderData.getTexture(kInputSampleCount);
     var["outputColor"] = renderData.getTexture(kOutputColor);
     var["outputAlbedo"] = renderData.getTexture(kOutputAlbedo);
     var["outputSpecularAlbedo"] = renderData.getTexture(kOutputSpecularAlbedo);
@@ -1376,7 +1273,7 @@ void PathTracer::resolvePass(RenderContext* pRenderContext, const RenderData& re
 
     if (mVarsChanged)
     {
-        var["sampleOffset"] = mpSampleOffset; // Can be nullptr
+        var["sampleOffset"] = mpSampleOffset;
         var["sampleColor"] = mpSampleColor;
         var["sampleGuideData"] = mpSampleGuideData;
         var["sampleNRDRadiance"] = mpSampleNRDRadiance;
@@ -1388,7 +1285,6 @@ void PathTracer::resolvePass(RenderContext* pRenderContext, const RenderData& re
         var["primaryHitDiffuseReflectance"] = renderData.getTexture(kOutputNRDDiffuseReflectance);
     }
 
-    // Launch one thread per pixel.
     mpResolvePass->execute(pRenderContext, { mParams.frameDim, 1u });
 }
 
@@ -1396,8 +1292,7 @@ DefineList PathTracer::StaticParams::getDefines(const PathTracer& owner) const
 {
     DefineList defines;
 
-    // Path tracer configuration.
-    defines.add("SAMPLES_PER_PIXEL", (owner.mFixedSampleCount ? std::to_string(samplesPerPixel) : "0")); // 0 indicates a variable sample count
+    defines.add("SAMPLES_PER_PIXEL", (owner.mFixedSampleCount ? std::to_string(samplesPerPixel) : "0"));
     defines.add("MAX_SURFACE_BOUNCES", std::to_string(maxSurfaceBounces));
     defines.add("MAX_DIFFUSE_BOUNCES", std::to_string(maxDiffuseBounces));
     defines.add("MAX_SPECULAR_BOUNCES", std::to_string(maxSpecularBounces));
@@ -1418,7 +1313,6 @@ DefineList PathTracer::StaticParams::getDefines(const PathTracer& owner) const
     defines.add("MIS_HEURISTIC", std::to_string((uint32_t)misHeuristic));
     defines.add("MIS_POWER_EXPONENT", std::to_string(misPowerExponent));
 
-    // Sampling utilities configuration.
     FALCOR_ASSERT(owner.mpSampleGenerator);
     defines.add(owner.mpSampleGenerator->getDefines());
 
@@ -1429,8 +1323,6 @@ DefineList PathTracer::StaticParams::getDefines(const PathTracer& owner) const
 
     defines.add("GBUFFER_ADJUST_SHADING_NORMALS", owner.mGBufferAdjustShadingNormals ? "1" : "0");
 
-    // Scene-specific configuration.
-    // Set defaults
     defines.add("USE_ENV_LIGHT", "0");
     defines.add("USE_ANALYTIC_LIGHTS", "0");
     defines.add("USE_EMISSIVE_LIGHTS", "0");
@@ -1449,7 +1341,6 @@ DefineList PathTracer::StaticParams::getDefines(const PathTracer& owner) const
         defines.add("USE_HAIR_MATERIAL", scene->getMaterialCountByType(MaterialType::Hair) > 0u ? "1" : "0");
     }
 
-    // Set default (off) values for additional features.
     defines.add("USE_VIEW_DIR", "0");
     defines.add("OUTPUT_GUIDE_DATA", "0");
     defines.add("OUTPUT_NRD_DATA", "0");

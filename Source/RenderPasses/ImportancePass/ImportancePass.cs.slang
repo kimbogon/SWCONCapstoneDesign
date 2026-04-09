@@ -1,0 +1,135 @@
+/***************************************************************************
+ # ImportancePass.cs.slang
+ #
+ # Computes per-pixel importance from GBufferRT channels.
+ # importance = saturate(0.5 * lumVar + 0.3 * normalGrad + 0.2 * depthGrad)
+ **************************************************************************/
+
+#ifndef HAS_DIFFUSE_OPACITY
+#define HAS_DIFFUSE_OPACITY 0
+#endif
+#ifndef HAS_GUIDE_NORMAL
+#define HAS_GUIDE_NORMAL 0
+#endif
+#ifndef HAS_LINEAR_Z
+#define HAS_LINEAR_Z 0
+#endif
+
+cbuffer CB
+{
+    uint2 frameDim;
+};
+
+// Inputs from GBufferRT (bound even when nullptr; guarded by defines).
+Texture2D<float4> gDiffuseOpacity;  // diffuseOpacity channel (RGBA32Float)
+Texture2D<float4> gGuideNormalW;    // guideNormalW channel   (RGBA32Float)
+Texture2D<float2> gLinearZ;         // linearZ channel        (RG32Float, .x = linearZ)
+
+RWTexture2D<float> gImportance;
+
+// --- helpers ---
+
+float luminance(float3 c)
+{
+    return dot(c, float3(0.299f, 0.587f, 0.114f));
+}
+
+float sampleLuminance(int2 p)
+{
+#if HAS_DIFFUSE_OPACITY
+    p = clamp(p, int2(0), int2(frameDim) - 1);
+    return luminance(gDiffuseOpacity[p].rgb);
+#else
+    return 0.f;
+#endif
+}
+
+float3 sampleNormal(int2 p)
+{
+#if HAS_GUIDE_NORMAL
+    p = clamp(p, int2(0), int2(frameDim) - 1);
+    return gGuideNormalW[p].xyz;
+#else
+    return float3(0.f, 0.f, 1.f);
+#endif
+}
+
+float sampleDepth(int2 p)
+{
+#if HAS_LINEAR_Z
+    p = clamp(p, int2(0), int2(frameDim) - 1);
+    return gLinearZ[p].x;
+#else
+    return 0.f;
+#endif
+}
+
+[numthreads(16, 16, 1)]
+void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixel = dispatchThreadId.xy;
+    if (any(pixel >= frameDim))
+        return;
+
+    int2 p = int2(pixel);
+
+    // ---- luminance variance (3x3 neighbourhood) ----
+    float lumVar = 0.f;
+#if HAS_DIFFUSE_OPACITY
+    {
+        float sum = 0.f;
+        float sumSq = 0.f;
+        [unroll]
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            [unroll]
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                float l = sampleLuminance(p + int2(dx, dy));
+                sum += l;
+                sumSq += l * l;
+            }
+        }
+        float mean = sum / 9.f;
+        float variance = max(0.f, sumSq / 9.f - mean * mean);
+        // Normalize: sqrt(variance) mapped through a soft knee; typical albedo variance is small.
+        lumVar = saturate(sqrt(variance) * 4.f);
+    }
+#endif
+
+    // ---- normal gradient (4-neighbour) ----
+    float normalGrad = 0.f;
+#if HAS_GUIDE_NORMAL
+    {
+        float3 nc = sampleNormal(p);
+        float d = 0.f;
+        d += length(nc - sampleNormal(p + int2(-1, 0)));
+        d += length(nc - sampleNormal(p + int2( 1, 0)));
+        d += length(nc - sampleNormal(p + int2( 0,-1)));
+        d += length(nc - sampleNormal(p + int2( 0, 1)));
+        // Max possible per-neighbour diff is 2.0 (opposite normals), average max = 2.0.
+        normalGrad = saturate(d / 4.f);
+    }
+#endif
+
+    // ---- depth gradient (4-neighbour, relative) ----
+    float depthGrad = 0.f;
+#if HAS_LINEAR_Z
+    {
+        float zc = sampleDepth(p);
+        if (zc > 0.f)
+        {
+            float d = 0.f;
+            d += abs(zc - sampleDepth(p + int2(-1, 0)));
+            d += abs(zc - sampleDepth(p + int2( 1, 0)));
+            d += abs(zc - sampleDepth(p + int2( 0,-1)));
+            d += abs(zc - sampleDepth(p + int2( 0, 1)));
+            // Normalize by centre depth so we get relative depth discontinuity.
+            depthGrad = saturate((d / 4.f) / zc * 10.f);
+        }
+    }
+#endif
+
+    float importance = saturate(0.5f * lumVar + 0.3f * normalGrad + 0.2f * depthGrad);
+    gImportance[pixel] = importance;
+}

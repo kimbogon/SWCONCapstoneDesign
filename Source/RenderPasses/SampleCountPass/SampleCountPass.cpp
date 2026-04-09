@@ -1,24 +1,22 @@
 /***************************************************************************
  # SampleCountPass.cpp
+ #
+ # Modified: importance-based sample count instead of centre-radius heuristic.
  **************************************************************************/
 #include "SampleCountPass.h"
-#include "RenderGraph/RenderPassStandardFlags.h"
 
 namespace
 {
     // Shader file (relative to the Falcor render-pass search paths).
     const std::string kShaderFile = "RenderPasses/SampleCountPass/SampleCountPass.cs.slang";
 
-    // Input channel – optional vbuffer (reserved for future depth-discontinuity heuristics).
-    const std::string kInputVBuffer = "vbuffer";
-
-    // Output channel name – must match the string PathTracer expects.
-    const std::string kOutputSampleCount = "sampleCount";
+    // Channel names — must match reflect().
+    const std::string kInputImportance    = "importance";
+    const std::string kOutputSampleCount  = "sampleCount";
 
     // Property keys.
-    const std::string kPropHighSamples  = "highSamples";
-    const std::string kPropLowSamples   = "lowSamples";
-    const std::string kPropCentreRadius = "centreRadius";
+    const std::string kPropThresholdLow  = "thresholdLow";
+    const std::string kPropThresholdHigh = "thresholdHigh";
 }
 
 // ---------------------------------------------------------------------------
@@ -40,9 +38,8 @@ void SampleCountPass::parseProperties(const Properties& props)
 {
     for (const auto& [key, value] : props)
     {
-        if      (key == kPropHighSamples)  mHighSamples  = value;
-        else if (key == kPropLowSamples)   mLowSamples   = value;
-        else if (key == kPropCentreRadius) mCentreRadius = value;
+        if (key == kPropThresholdLow)       mThresholdLow  = value;
+        else if (key == kPropThresholdHigh) mThresholdHigh = value;
         else logWarning("SampleCountPass: Unknown property '{}'.", key);
     }
 }
@@ -50,30 +47,27 @@ void SampleCountPass::parseProperties(const Properties& props)
 Properties SampleCountPass::getProperties() const
 {
     Properties props;
-    props[kPropHighSamples]  = mHighSamples;
-    props[kPropLowSamples]   = mLowSamples;
-    props[kPropCentreRadius] = mCentreRadius;
+    props[kPropThresholdLow]  = mThresholdLow;
+    props[kPropThresholdHigh] = mThresholdHigh;
     return props;
 }
 
 // ---------------------------------------------------------------------------
-// Reflection
+// Reflect
 // ---------------------------------------------------------------------------
 
 RenderPassReflection SampleCountPass::reflect(const CompileData& compileData)
 {
     RenderPassReflection reflector;
 
-    // Optional vbuffer input – not used in the simple heuristic but keeps the
-    // pass compatible with graphs where it sits after VBufferRT.
-    reflector.addInput(kInputVBuffer, "Visibility buffer (optional)")
-             .flags(RenderPassReflection::Field::Flags::Optional);
+    // Importance input from ImportancePass (R32Float).
+    reflector.addInput(kInputImportance, "Per-pixel importance [0,1] (R32Float)")
+        .format(ResourceFormat::R32Float);
 
-    // R8Uint output texture.  The size is inherited from the render graph
-    // (RenderPassReflection::Field::Type::Texture2D default behaviour).
+    // R8Uint output — PathTracer reads this as Texture2D<uint>.
     reflector.addOutput(kOutputSampleCount, "Per-pixel sample count (R8Uint)")
-             .format(ResourceFormat::R8Uint)
-             .bindFlags(ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        .format(ResourceFormat::R8Uint)
+        .bindFlags(ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
 
     return reflector;
 }
@@ -84,23 +78,31 @@ RenderPassReflection SampleCountPass::reflect(const CompileData& compileData)
 
 void SampleCountPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    // Retrieve the output texture that the render graph has allocated for us.
-    ref<Texture> pOutput = renderData.getTexture(kOutputSampleCount);
+    // Retrieve the input/output texture that the render graph has allocated for us.
+    ref<Texture> pImportance = renderData.getTexture(kInputImportance);
+    ref<Texture> pOutput     = renderData.getTexture(kOutputSampleCount);
     FALCOR_ASSERT(pOutput);
 
-    const uint32_t width  = pOutput->getWidth();
-    const uint32_t height = pOutput->getHeight();
+    const uint32_t w = pOutput->getWidth();
+    const uint32_t h = pOutput->getHeight();
 
     // Bind shader variables.
     auto var = mpComputePass->getRootVar();
-    var["CB"]["frameDim"]     = uint2(width, height);
-    var["CB"]["highSamples"]  = mHighSamples;
-    var["CB"]["lowSamples"]   = mLowSamples;
-    var["CB"]["centreRadius"] = mCentreRadius;
-    var["gOutput"]            = pOutput;
+    var["CB"]["frameDim"]       = uint2(w, h);
+    var["CB"]["thresholdLow"]   = mThresholdLow;
+    var["CB"]["thresholdHigh"]  = mThresholdHigh;
+    var["gImportance"]          = pImportance;
+    var["gOutput"]              = pOutput;
 
+    /*
+    const uint32_t groupSize = 16;
+    mpComputePass->execute(pRenderContext, { div_round_up(w, groupSize), div_round_up(h, groupSize), 1u });
+    */
+
+    
     // Dispatch one thread per pixel.
-    mpComputePass->execute(pRenderContext, width, height);
+    mpComputePass->execute(pRenderContext, w, h);
+    
 }
 
 // ---------------------------------------------------------------------------
@@ -109,12 +111,10 @@ void SampleCountPass::execute(RenderContext* pRenderContext, const RenderData& r
 
 void SampleCountPass::renderUI(Gui::Widgets& widget)
 {
-    widget.var("High sample count", mHighSamples, 1u, 255u);
-    widget.tooltip("Samples per pixel in the centre disc.");
-    widget.var("Low sample count",  mLowSamples,  1u, 255u);
-    widget.tooltip("Samples per pixel outside the centre disc.");
-    widget.var("Centre radius (fraction)", mCentreRadius, 0.0f, 1.0f, 0.01f);
-    widget.tooltip("Radius of the high-sample disc as a fraction of min(width, height).");
+    widget.var("Low threshold",  mThresholdLow,  0.0f, 1.0f, 0.01f);
+    widget.tooltip("importance < this => 1 spp");
+    widget.var("High threshold", mThresholdHigh, 0.0f, 1.0f, 0.01f);
+    widget.tooltip("importance >= this => 4 spp, else 2 spp");
 }
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
