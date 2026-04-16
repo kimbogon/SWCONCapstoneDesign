@@ -4,7 +4,6 @@
  # Computes per-pixel importance from GBufferRT channels.
  # importance = saturate(0.5 * lumVar + 0.3 * normalGrad + 0.2 * depthGrad)
  **************************************************************************/
-
 #ifndef HAS_DIFFUSE_OPACITY
 #define HAS_DIFFUSE_OPACITY 0
 #endif
@@ -13,6 +12,10 @@
 #endif
 #ifndef HAS_LINEAR_Z
 #define HAS_LINEAR_Z 0
+#endif
+// [ShadowCount] Guard define for shadow count input availability.
+#ifndef HAS_SHADOW_COUNT
+#define HAS_SHADOW_COUNT 0
 #endif
 
 cbuffer CB
@@ -24,11 +27,12 @@ cbuffer CB
 Texture2D<float4> gDiffuseOpacity;  // diffuseOpacity channel (RGBA32Float)
 Texture2D<float4> gGuideNormalW;    // guideNormalW channel   (RGBA32Float)
 Texture2D<float2> gLinearZ;         // linearZ channel        (RG32Float, .x = linearZ)
+// [ShadowCount] Shadow count input from GBufferRT (R32Uint).
+Texture2D<uint> gShadowCount;
 
 RWTexture2D<float> gImportance;
 
 // --- helpers ---
-
 float luminance(float3 c)
 {
     return dot(c, float3(0.299f, 0.587f, 0.114f));
@@ -61,6 +65,17 @@ float sampleDepth(int2 p)
     return gLinearZ[p].x;
 #else
     return 0.f;
+#endif
+}
+
+// [ShadowCount] Helper to sample shadow count at a given pixel.
+uint sampleShadowCount(int2 p)
+{
+#if HAS_SHADOW_COUNT
+    p = clamp(p, int2(0), int2(frameDim) - 1);
+    return gShadowCount[p];
+#else
+    return 0u;
 #endif
 }
 
@@ -129,6 +144,9 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
     }
 #endif
+
+    // [ShadowCount] Read shadow count for this pixel (available for future use in importance computation).
+    // uint sc = sampleShadowCount(p);
 
     float importance = saturate(0.5f * lumVar + 0.3f * normalGrad + 0.2f * depthGrad);
     gImportance[pixel] = importance;

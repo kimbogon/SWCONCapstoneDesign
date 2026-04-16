@@ -47,6 +47,7 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
     const HitInfo hit = sceneRayQuery.traceRay(ray, hitT, GBufferRT::kRayFlags);
     if (hit.isValid())
     {
+        // [ShadowCount] writeHit internally calls computeShadowCount() and writes to gShadowCount.
         gGBufferRT.writeHit(pixel, ray.origin, ray.dir, hit, hitT);
     }
     else

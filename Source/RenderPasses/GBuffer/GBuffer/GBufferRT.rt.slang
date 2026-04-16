@@ -78,6 +78,7 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     triangleHit.barycentrics = attribs.barycentrics;
 
     // Write GBuffer data.
+    // [ShadowCount] writeHit internally computes and writes shadowCount via computeShadowCount() using inline ray tracing.
     uint2 launchIndex = DispatchRaysIndex().xy;
     gGBufferRT.writeHit(launchIndex, WorldRayOrigin(), WorldRayDirection(), HitInfo(triangleHit), RayTCurrent());
 }
@@ -183,7 +184,7 @@ void rayGen()
     GpuTimer timer;
     gGBufferRT.beginTime(timer);
 
-    // Trace ray.
+    // Trace primary ray.
     const Ray ray = gGBufferRT.generateRay(launchIndex);
     RayData rayData;
     TraceRay(
@@ -196,6 +197,10 @@ void rayGen()
         ray.toRayDesc(),
         rayData
     );
+
+    // [ShadowCount] Note: Shadow count is computed inside writeHit() via computeShadowCount(),
+    // which uses inline ray tracing (RayQuery). The closestHit/miss shaders call writeHit/writeMiss
+    // respectively, so no additional work is needed here.
 
     gGBufferRT.writeAux(launchIndex, ray);
 

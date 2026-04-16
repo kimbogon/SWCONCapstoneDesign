@@ -62,6 +62,8 @@ const ChannelList kGBufferExtraChannels = {
     { "time",                       "gTime",                        "Per-pixel execution time",                                true /* optional */, ResourceFormat::R32Uint      },
     { "disocclusion",               "gDisocclusion",                "Disocclusion mask",                                       true /* optional */, ResourceFormat::R32Float     },
     { "mask",                       "gMask",                        "Mask",                                                    true /* optional */, ResourceFormat::R32Float     },
+    // [ShadowCount] shadowCount 채널 추가 — 차폐된 광원의 수를 기록하는 uint 버퍼
+    { "shadowCount",                "gShadowCount",                 "Number of occluded lights per pixel",                     true /* optional */, ResourceFormat::R32Uint      },
     // clang-format on
 };
 } // namespace
@@ -145,8 +147,6 @@ void GBufferRT::execute(RenderContext* pRenderContext, const RenderData& renderD
     if (mLODMode == TexLODMode::RayDiffs)
     {
         // TODO: Remove this warning when the TexLOD code has been fixed.
-        // logWarning("GBufferRT::execute() - Ray differentials are not tested for instance transforms that flip the coordinate system
-        // handedness. The results may be incorrect.");
     }
 
     mUseTraceRayInline ? executeCompute(pRenderContext, renderData) : executeRaytrace(pRenderContext, renderData);
@@ -209,7 +209,6 @@ void GBufferRT::parseProperties(const Properties& props)
             mUseTraceRayInline = value;
         else if (key == kUseDOF)
             mUseDOF = value;
-        // TODO: Check for unparsed fields, including those parsed in base classes.
     }
 }
 
@@ -268,8 +267,6 @@ void GBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
                 0, mpScene->getGeometryIDs(Scene::GeometryType::SDFGrid), desc.addHitGroup("sdfGridClosestHit", "", "sdfGridIntersection")
             );
         }
-
-        // Add hit groups for for other procedural primitives here.
 
         mRaytrace.pProgram = Program::create(mpDevice, desc, defines);
         mRaytrace.pVars = RtProgramVars::create(mpDevice, mRaytrace.pProgram, sbt);

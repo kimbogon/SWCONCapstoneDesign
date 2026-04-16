@@ -60,6 +60,9 @@ RWTexture2D<uint> gTime;
 RWTexture2D<float> gDisocclusion;
 RWTexture2D<float> gMask;
 
+// [ShadowCount] Shadow count output buffer — stores the number of occluded lights per pixel.
+RWTexture2D<uint> gShadowCount;
+
 #define is_valid(name) (is_valid_##name != 0)
 
 #if !defined(COMPUTE_DEPTH_OF_FIELD) || !defined(USE_ALPHA_TEST) || !defined(LOD_MODE) || !defined(ADJUST_SHADING_NORMALS) || !defined(RAY_FLAGS)
@@ -74,6 +77,9 @@ struct GBufferRT
     static const bool kAdjustShadingNormals = ADJUST_SHADING_NORMALS;
     static const uint kRayFlags = RAY_FLAGS;
     static const float kEnvMapDepth = 100000000.0f; // Arbitrary big number
+
+    // [ShadowCount] Epsilon for shadow ray origin offset to prevent self-intersection.
+    static const float kShadowRayEpsilon = 1e-4f;
 
     uint2 frameDim;
     float2 invFrameDim;
@@ -185,6 +191,80 @@ struct GBufferRT
     bool evalModifyNormal(const HitType hitType)
     {
         return true;
+    }
+
+    /**
+     * [ShadowCount] Compute the number of occluded (shadowed) lights at a given world-space position.
+     *
+     * Iterates over all analytic lights in the scene. For each light, a shadow ray is cast
+     * from the shading point (offset along the normal by kShadowRayEpsilon to avoid
+     * self-intersection) toward the light source.
+     *
+     * Uses RayQuery (inline ray tracing) with RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH and
+     * RAY_FLAG_SKIP_CLOSEST_HIT_SHADER for optimal performance — we only need a binary
+     * occluded/visible result, not the closest hit details.
+     *
+     * @param worldPos   World-space position of the shading point.
+     * @param normalW    Shading normal used for origin offset (self-intersection avoidance).
+     * @return           Number of occluded (shadowed) lights.
+     */
+    uint computeShadowCount(float3 worldPos, float3 normalW)
+    {
+        uint shadowCount = 0;
+        uint lightCount = gScene.getLightCount();
+
+        // Offset ray origin along shading normal to prevent self-intersection.
+        float3 origin = worldPos + normalW * kShadowRayEpsilon;
+
+        for (uint i = 0; i < lightCount; i++)
+        {
+            // Get light data for analytic light i.
+            LightData light = gScene.getLight(i);
+
+            // Compute direction and distance to light.
+            float3 toLight;
+            float distance;
+
+            if (light.type == LightType::Directional)
+            {
+                // For directional lights, direction is stored in light.dirW; ray goes opposite.
+                toLight = -light.dirW;
+                distance = kEnvMapDepth; // Effectively infinite distance.
+            }
+            else
+            {
+                // Point or spot light — direction from shading point to light position.
+                toLight = light.posW - origin;
+                distance = length(toLight);
+                if (distance < 1e-7f) continue; // Degenerate case — skip.
+                toLight /= distance; // Normalize.
+            }
+
+            // Create shadow ray descriptor.
+            RayDesc shadowRay;
+            shadowRay.Origin = origin;
+            shadowRay.Direction = toLight;
+            shadowRay.TMin = 0.0f;
+            shadowRay.TMax = distance;
+
+            // Trace shadow ray using inline ray tracing (RayQuery) with optimized flags.
+            RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER> rayQuery;
+            rayQuery.TraceRayInline(
+                gScene.rtAccel,
+                0,    // additional ray flags
+                0xff, // instance inclusion mask
+                shadowRay
+            );
+            rayQuery.Proceed();
+
+            // If any geometry was hit between the surface and the light, the light is occluded.
+            if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT || rayQuery.CommittedStatus() == COMMITTED_PROCEDURAL_PRIMITIVE_HIT)
+            {
+                shadowCount++;
+            }
+        }
+
+        return shadowCount;
     }
 
     void writeHit(uint2 pixel, float3 rayOrigin, float3 rayDir, const HitInfo hit, float hitT)
@@ -320,6 +400,13 @@ struct GBufferRT
         if (is_valid(gMask))
             gMask[pixel] = 1.0f;
 
+        // [ShadowCount] Compute and write shadow count for this pixel.
+        // Uses face normal (sd.faceN) for the offset direction to ensure robust self-intersection avoidance.
+        if (is_valid(gShadowCount))
+        {
+            gShadowCount[pixel] = computeShadowCount(sd.posW, sd.faceN);
+        }
+
         if (is_valid(gLinearZ))
         {
             float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
@@ -422,6 +509,10 @@ struct GBufferRT
             gDisocclusion[pixel] = 0.f;
         if (is_valid(gMask))
             gMask[pixel] = 0.0f;
+
+        // [ShadowCount] No hit — no shadows to compute. Write 0.
+        if (is_valid(gShadowCount))
+            gShadowCount[pixel] = 0u;
     }
 
     void writeAux(uint2 pixel, const Ray ray)
