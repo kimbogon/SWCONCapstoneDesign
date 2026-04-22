@@ -62,6 +62,10 @@ def render_graph_AdaptivePathTracer():
     # --- Output -----------------------------------------------------------
     # 기존 렌더링 결과 출력 유지 (ErrorMeasurePass 는 평가용으로만 사용)
     g.markOutput("ToneMapper.dst")
+    # Importance Map 시각화 출력 등록
+    g.markOutput("ImportancePass.importanceVis")
+    # Sample Count Map 시각화 출력 등록
+    g.markOutput("SampleCountPass.sampleCountVis")
 
     return g
 

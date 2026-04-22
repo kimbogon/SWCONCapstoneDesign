@@ -4,6 +4,13 @@
  # Modified: now reads an importance texture (R32Float) instead of using
  # a centre-radius heuristic.  Sample count is 1, 2, or 4 based on
  # importance thresholds.
+ #
+ # [디버그 출력 추가]
+ # sampleCountVis 채널: 픽셀별 sample count (1/2/4 spp) 를 정규화된
+ # RGBA8Unorm 텍스처로 시각화하여 RenderGraph output으로 노출한다.
+ #   1 spp → 어두운 색 (0.25)
+ #   2 spp → 중간 색  (0.50)
+ #   4 spp → 밝은 색  (1.00)
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
