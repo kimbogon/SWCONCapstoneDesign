@@ -28,6 +28,7 @@
 #include "ErrorMeasurePass.h"
 #include "Core/AssetResolver.h"
 #include <sstream>
+#include <cmath>    // std::log10, std::isinf, std::isnan
 
 namespace
 {
@@ -52,19 +53,17 @@ const std::string kUseLoadedReference = "UseLoadedReference";
 const std::string kReportRunningError = "ReportRunningError";
 const std::string kRunningErrorSigma = "RunningErrorSigma";
 const std::string kSelectedOutputId = "SelectedOutputId";
+
+// [요구사항 5-3] MSE=0 시 PSNR 상한 클램프 값 (inf 방지)
+constexpr float kPSNRMax = 999.0f;
+// MSE가 이 값 이하면 최대 PSNR을 반환 (division-by-zero 방지)
+constexpr float kMSEMinThreshold = 1e-10f;
 } // namespace
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
     registry.registerClass<RenderPass, ErrorMeasurePass>();
 }
-
-const Gui::RadioButtonGroup ErrorMeasurePass::sOutputSelectionButtons = {
-    {(uint32_t)OutputId::Source, "Source", true},
-    {(uint32_t)OutputId::Reference, "Reference", true},
-    {(uint32_t)OutputId::Difference, "Difference", true}};
-
-const Gui::RadioButtonGroup ErrorMeasurePass::sOutputSelectionButtonsSourceOnly = {{(uint32_t)OutputId::Source, "Source", true}};
 
 ErrorMeasurePass::ErrorMeasurePass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
@@ -122,8 +121,8 @@ RenderPassReflection ErrorMeasurePass::reflect(const CompileData& compileData)
     RenderPassReflection reflector;
     reflector.addInput(kInputChannelSourceImage, "Source image");
     reflector.addInput(kInputChannelReferenceImage, "Reference image (optional)").flags(RenderPassReflection::Field::Flags::Optional);
+    // [요구사항 5-2] WorldPosition은 Optional: 없어도 크래시 없이 동작
     reflector.addInput(kInputChannelWorldPosition, "World-space position").flags(RenderPassReflection::Field::Flags::Optional);
-    // TODO: when compile() is available, match the format of the source image?
     reflector.addOutput(kOutputChannelImage, "Output image").format(ResourceFormat::RGBA32Float);
     return reflector;
 }
@@ -160,6 +159,23 @@ void ErrorMeasurePass::execute(RenderContext* pRenderContext, const RenderData& 
         return;
     }
 
+    // [요구사항 5-1] Reference 와 Source 해상도 불일치 시 처리
+    // Reference 크기가 Source 와 다른 경우, 경고 로그를 남기고 Source 를 그대로 출력한다.
+    // (blit 으로 스케일 복사하는 방식도 가능하나, 오차 지표가 왜곡되므로 스킵이 더 안전)
+    {
+        const uint32_t refW = pReference->getWidth(), refH = pReference->getHeight();
+        if (refW != width || refH != height)
+        {
+            logWarning(
+                "ErrorMeasurePass: Source resolution ({}x{}) differs from Reference resolution ({}x{}). "
+                "Skipping error measurement for this frame.",
+                width, height, refW, refH
+            );
+            pRenderContext->blit(pSourceImageTexture->getSRV(), pOutputImageTexture->getRTV());
+            return;
+        }
+    }
+
     runDifferencePass(pRenderContext, renderData);
     runReductionPasses(pRenderContext, renderData);
 
@@ -185,17 +201,20 @@ void ErrorMeasurePass::runDifferencePass(RenderContext* pRenderContext, const Re
 {
     // Bind textures.
     ref<Texture> pSourceTexture = renderData.getTexture(kInputChannelSourceImage);
+
+    // [요구사항 5-2] WorldPosition 이 없으면 nullptr 이 되고, 셰이더 측 gIgnoreBackground=0 으로 처리됨
     ref<Texture> pWorldPositionTexture = renderData.getTexture(kInputChannelWorldPosition);
+
     auto var = mpErrorMeasurerPass->getRootVar();
     var["gReference"] = getReference(renderData);
     var["gSource"] = pSourceTexture;
-    var["gWorldPosition"] = pWorldPositionTexture;
+    var["gWorldPosition"] = pWorldPositionTexture; // nullptr 이어도 Optional 이므로 안전
     var["gResult"] = mpDifferenceTexture;
 
     // Set constant buffer parameters.
     const uint2 resolution = uint2(pSourceTexture->getWidth(), pSourceTexture->getHeight());
     var[kConstantBufferName]["gResolution"] = resolution;
-    // If the world position texture is unbound, then don't do the background pixel check.
+    // WorldPosition 이 nullptr 이면 배경 무시 기능 자동 비활성화
     var[kConstantBufferName]["gIgnoreBackground"] = (uint32_t)(mIgnoreBackground && pWorldPositionTexture);
     var[kConstantBufferName]["gComputeDiffSqr"] = (uint32_t)mComputeSquaredDifference;
     var[kConstantBufferName]["gComputeAverage"] = (uint32_t)mComputeAverage;
@@ -213,6 +232,33 @@ void ErrorMeasurePass::runReductionPasses(RenderContext* pRenderContext, const R
     mMeasurements.error = error.xyz() / pixelCountf;
     mMeasurements.avgError = (mMeasurements.error.x + mMeasurements.error.y + mMeasurements.error.z) / 3.f;
     mMeasurements.valid = true;
+
+    // ------------------------------------------------------------------
+    // PSNR 계산
+    // PSNR = 10 * log10(1.0 / MSE)  (max signal value = 1.0 기준)
+    // MSE 가 0 이거나 극히 작을 때 inf/nan 방지를 위해 임계값 아래면 kPSNRMax 클램프
+    // ------------------------------------------------------------------
+    if (mComputeSquaredDifference)
+    {
+        // MSE <= kMSEMinThreshold 이면 최대값으로 클램프 (division-by-zero 방지)
+        if (mMeasurements.avgError <= kMSEMinThreshold)
+        {
+            mMeasurements.psnr = kPSNRMax;
+        }
+        else
+        {
+            float psnr = 10.0f * std::log10(1.0f / mMeasurements.avgError);
+            // 혹시라도 inf/nan 이 되었을 경우 추가 방어
+            if (std::isinf(psnr) || std::isnan(psnr))
+                psnr = kPSNRMax;
+            mMeasurements.psnr = psnr;
+        }
+    }
+    else
+    {
+        // L1 모드에서는 PSNR 정의가 모호하므로 무효값으로 설정
+        mMeasurements.psnr = -1.0f;
+    }
 
     if (mRunningAvgError < 0)
     {
@@ -332,6 +378,18 @@ void ErrorMeasurePass::renderUI(Gui::Widgets& widget)
             << (mReportRunningError ? mRunningError.g : mMeasurements.error.g) << ", "
             << (mReportRunningError ? mRunningError.b : mMeasurements.error.b);
         widget.text(oss.str());
+
+        // [요구사항 3] PSNR 출력 (MSE 모드일 때만 의미 있는 값)
+        if (mComputeSquaredDifference)
+        {
+            // MSE 값을 고정소수점으로 별도 표시
+            widget.text(fmt::format("MSE: {:.6f}", mMeasurements.avgError));
+            // PSNR 값 표시 (dB 단위); kPSNRMax 이면 "inf (clamped)" 로 표현
+            if (mMeasurements.psnr >= kPSNRMax)
+                widget.text("PSNR: inf (clamped) dB");
+            else
+                widget.text(fmt::format("PSNR: {:.2f} dB", mMeasurements.psnr));
+        }
     }
     else
     {
@@ -358,7 +416,6 @@ bool ErrorMeasurePass::loadReference()
     if (mReferenceImagePath.empty())
         return false;
 
-    // TODO: it would be nice to also be able to take the reference image as an input.
     std::filesystem::path resolvedPath = AssetResolver::getDefaultResolver().resolvePath(mReferenceImagePath);
     mpReferenceTexture = Texture::createFromFile(mpDevice, resolvedPath, false /* no MIPs */, false /* linear color */);
     if (!mpReferenceTexture)
@@ -392,13 +449,14 @@ bool ErrorMeasurePass::loadMeasurementsFile()
     }
     else
     {
+        // [요구사항 4] CSV 헤더에 psnr 컬럼 추가 (frame, mse, psnr 순서)
         if (mComputeSquaredDifference)
         {
-            mMeasurementsFile << "avg_L2_error,red_L2_error,green_L2_error,blue_L2_error" << std::endl;
+            mMeasurementsFile << "frame,avg_L2_error,red_L2_error,green_L2_error,blue_L2_error,psnr" << std::endl;
         }
         else
         {
-            mMeasurementsFile << "avg_L1_error,red_L1_error,green_L1_error,blue_L1_error" << std::endl;
+            mMeasurementsFile << "frame,avg_L1_error,red_L1_error,green_L1_error,blue_L1_error,psnr" << std::endl;
         }
         mMeasurementsFile << std::scientific;
     }
@@ -412,7 +470,24 @@ void ErrorMeasurePass::saveMeasurementsToFile()
         return;
 
     FALCOR_ASSERT(mMeasurements.valid);
+
+    // [요구사항 4] frame 카운터, MSE, RGB 오차, PSNR 순서로 기록
+    mMeasurementsFile << mFrameIndex << ",";
     mMeasurementsFile << mMeasurements.avgError << ",";
-    mMeasurementsFile << mMeasurements.error.r << ',' << mMeasurements.error.g << ',' << mMeasurements.error.b;
+    mMeasurementsFile << mMeasurements.error.r << ","
+                      << mMeasurements.error.g << ","
+                      << mMeasurements.error.b << ",";
+
+    // PSNR: L1 모드이거나 무효(-1)이면 "N/A", 클램프 상한이면 "inf" 로 기록
+    if (mMeasurements.psnr < 0.0f)
+        mMeasurementsFile << "N/A";
+    else if (mMeasurements.psnr >= kPSNRMax)
+        mMeasurementsFile << "inf";
+    else
+        mMeasurementsFile << mMeasurements.psnr;
+
     mMeasurementsFile << std::endl;
+
+    // 프레임 카운터 증가
+    ++mFrameIndex;
 }
