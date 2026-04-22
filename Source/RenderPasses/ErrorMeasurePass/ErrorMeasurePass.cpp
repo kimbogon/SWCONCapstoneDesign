@@ -65,13 +65,6 @@ extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registr
     registry.registerClass<RenderPass, ErrorMeasurePass>();
 }
 
-const Gui::RadioButtonGroup ErrorMeasurePass::sOutputSelectionButtons = {
-    {(uint32_t)OutputId::Source, "Source", true},
-    {(uint32_t)OutputId::Reference, "Reference", true},
-    {(uint32_t)OutputId::Difference, "Difference", true}};
-
-const Gui::RadioButtonGroup ErrorMeasurePass::sOutputSelectionButtonsSourceOnly = {{(uint32_t)OutputId::Source, "Source", true}};
-
 ErrorMeasurePass::ErrorMeasurePass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     for (const auto& [key, value] : props)
@@ -241,13 +234,13 @@ void ErrorMeasurePass::runReductionPasses(RenderContext* pRenderContext, const R
     mMeasurements.valid = true;
 
     // ------------------------------------------------------------------
-    // [요구사항 2] PSNR 계산
+    // PSNR 계산
     // PSNR = 10 * log10(1.0 / MSE)  (max signal value = 1.0 기준)
     // MSE 가 0 이거나 극히 작을 때 inf/nan 방지를 위해 임계값 아래면 kPSNRMax 클램프
     // ------------------------------------------------------------------
     if (mComputeSquaredDifference)
     {
-        // [요구사항 5-3] MSE <= kMSEMinThreshold 이면 최대값으로 클램프 (division-by-zero 방지)
+        // MSE <= kMSEMinThreshold 이면 최대값으로 클램프 (division-by-zero 방지)
         if (mMeasurements.avgError <= kMSEMinThreshold)
         {
             mMeasurements.psnr = kPSNRMax;

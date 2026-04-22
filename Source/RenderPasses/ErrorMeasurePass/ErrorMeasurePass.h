@@ -121,8 +121,13 @@ private:
 
     OutputId mSelectedOutputId = OutputId::Source;
 
-    static const Gui::RadioButtonGroup sOutputSelectionButtons;
-    static const Gui::RadioButtonGroup sOutputSelectionButtonsSourceOnly;
+    static inline const Gui::RadioButtonGroup sOutputSelectionButtons = {
+        {(uint32_t)OutputId::Source, "Source", true},
+        {(uint32_t)OutputId::Reference, "Reference", true},
+        {(uint32_t)OutputId::Difference, "Difference", true}
+    };
+
+    static inline const Gui::RadioButtonGroup sOutputSelectionButtonsSourceOnly = {{(uint32_t)OutputId::Source, "Source", true}};
 
     // private 멤버 변수 섹션에 추가
     uint32_t mFrameIndex = 0; ///< CSV 기록용 프레임 카운터 [요구사항 4]
