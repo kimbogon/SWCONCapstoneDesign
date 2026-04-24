@@ -40,6 +40,7 @@ def render_graph_AdaptivePathTracer():
     g.addEdge("GBufferRT.guideNormalW",   "ImportancePass.guideNormalW")
     g.addEdge("GBufferRT.diffuseOpacity", "ImportancePass.diffuseOpacity")
     g.addEdge("GBufferRT.linearZ",        "ImportancePass.linearZ")
+    g.addEdge("GBufferRT.shadowCount",        "ImportancePass.shadowCount")
 
     g.addEdge("ImportancePass.importance",  "SampleCountPass.importance")
     g.addEdge("SampleCountPass.sampleCount", "PathTracer.sampleCount")
