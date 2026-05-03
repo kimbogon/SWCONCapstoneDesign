@@ -5,8 +5,8 @@
 /tests/data/
 
 # Media folders.
-/media
-/media_internal
+# /media
+# /media_internal
 
 # Packman folders.
 /external/packman/

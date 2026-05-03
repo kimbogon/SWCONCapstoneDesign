@@ -1,0 +1,132 @@
+from falcor import *
+
+# ------------------------------------------------------------
+# 1. 메시 생성
+# ------------------------------------------------------------
+quadMesh   = TriangleMesh.createQuad()
+cubeMesh   = TriangleMesh.createCube()
+
+# ------------------------------------------------------------
+# 2. 머티리얼 생성
+# ------------------------------------------------------------
+matFloor = StandardMaterial('Floor')
+matFloor.baseColor = float4(0.6, 0.6, 0.6, 1.0)
+matFloor.roughness = 0.8
+
+matWall = StandardMaterial('Wall')
+matWall.baseColor = float4(0.7, 0.7, 0.7, 1.0)
+matWall.roughness = 0.9
+
+# ------------------------------------------------------------
+# 3. 메시를 SceneBuilder에 등록
+# ------------------------------------------------------------
+quadMeshID = sceneBuilder.addTriangleMesh(quadMesh, matFloor)
+cubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matWall)
+
+# ------------------------------------------------------------
+# 4. 노드 추가 + 메시 인스턴스 연결
+# ------------------------------------------------------------
+
+# 바닥 
+# floorMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matFloor)
+floorNodeID = sceneBuilder.addNode('floor', Transform(
+    scaling=float3(20, 0.1, 20),
+    translation=float3(0, 0, 0)
+))
+sceneBuilder.addMeshInstance(floorNodeID, quadMeshID)
+
+# 왼쪽 벽
+wallLNodeID = sceneBuilder.addNode('wall_left', Transform(
+    scaling=float3(0.2, 3, 20),
+    translation=float3(-3, 1.5, 0)
+))
+sceneBuilder.addMeshInstance(wallLNodeID, cubeMeshID)
+
+# 오른쪽 벽
+wallRNodeID = sceneBuilder.addNode('wall_right', Transform(
+    scaling=float3(0.2, 3, 20),
+    translation=float3(3, 1.5, 0)
+))
+sceneBuilder.addMeshInstance(wallRNodeID, cubeMeshID)
+
+# 뒤 벽
+wallBNodeID = sceneBuilder.addNode('wall_back', Transform(
+    scaling=float3(6, 3, 0.2),
+    translation=float3(0, 1.5, -10)
+))
+sceneBuilder.addMeshInstance(wallBNodeID, cubeMeshID)
+
+# 코너 벽
+cornerNodeID = sceneBuilder.addNode('corner_wall', Transform(
+    scaling=float3(6, 3, 0.2),
+    translation=float3(0, 1.5, 5)
+))
+sceneBuilder.addMeshInstance(cornerNodeID, cubeMeshID)
+
+# 구형 적 오브젝트
+# 카메라: position=(0,1.7,-5), target=(0,1.7,0), focalLength=21
+# z=2 에 배치하면 카메라 정면 시야 중앙에 위치
+# 벽이 x=-3 ~ x=3 이므로 좌우 진폭은 ±1.8 으로 여유있게 설정
+matEnemy = StandardMaterial('Enemy')
+matEnemy.baseColor = float4(0.9, 0.2, 0.2, 1.0)   # 빨간 구
+matEnemy.roughness = 0.3
+matEnemy.metallic  = 0.6
+
+sphereMesh   = TriangleMesh.createSphere(radius=0.4)
+sphereMeshID = sceneBuilder.addTriangleMesh(sphereMesh, matEnemy)
+
+# 초기 위치: 중앙, 눈높이(y=1.7), z=2 (카메라 정면)
+enemyNodeID = sceneBuilder.addNode('enemy', Transform(translation=float3(0, 1.7, 2)))
+sceneBuilder.addMeshInstance(enemyNodeID, sphereMeshID)
+
+
+# ------------------------------------------------------------
+# 5. 카메라
+# ------------------------------------------------------------
+camera = Camera('MainCamera')
+camera.position    = float3(0, 1.7, -5)
+camera.target      = float3(0, 1.7, 0)
+camera.up          = float3(0, 1, 0)
+camera.focalLength = 21
+sceneBuilder.addCamera(camera)
+
+# ------------------------------------------------------------
+# 6. 조명
+# ------------------------------------------------------------
+
+dirLight = DistantLight('Sun')
+dirLight.direction = float3(0, -1, 0)  # 정확히 수직 아래
+dirLight.intensity = float3(5, 5, 5)
+dirLight.angle = 0.1
+sceneBuilder.addLight(dirLight)
+
+
+'''
+# 기존 dirLight 유지
+dirLight = DistantLight('Sun')
+dirLight.direction = float3(-0.3, -1, -0.2)
+dirLight.intensity = float3(3, 3, 3)
+dirLight.angle = 0.1
+sceneBuilder.addLight(dirLight)
+
+# 아래에서 위로 올라오는 보조광 추가 (바닥 반사광 느낌)
+fillLight = DistantLight('Fill')
+fillLight.direction = float3(0.3, 1, 0.2)
+fillLight.intensity = float3(1, 1, 1)
+fillLight.angle = 0.1
+sceneBuilder.addLight(fillLight)
+
+# 점광원 대신 천장 에미시브 패널로 대체
+matCeiling = StandardMaterial('CeilingLight')
+matCeiling.emissiveColor  = float3(1.0, 1.0, 1.0)
+matCeiling.emissiveFactor = 30.0
+matCeiling.baseColor      = float4(1, 1, 1, 1)
+
+ceilMeshID = sceneBuilder.addTriangleMesh(quadMesh, matCeiling)
+ceilNodeID = sceneBuilder.addNode('ceiling_light', Transform(
+    scaling=float3(2, 1, 2),
+    translation=float3(0, 2.9, 0),
+    rotationEulerDeg=float3(-90, 0, 0)
+))
+sceneBuilder.addMeshInstance(ceilNodeID, ceilMeshID)
+'''
