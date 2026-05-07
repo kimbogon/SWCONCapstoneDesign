@@ -81,6 +81,35 @@ sceneBuilder.addMeshInstance(enemyNodeID, sphereMeshID)
 
 
 # ------------------------------------------------------------
+# 초록색 큐브 (플레이어 왼쪽 앞)
+# 카메라: position=(0,1.7,-5), target 방향(+z) 기준
+# 왼쪽(-x), 앞쪽(+z) 에 배치
+matGreen = StandardMaterial('GreenCube')
+matGreen.baseColor = float4(0.1, 0.8, 0.2, 1.0)
+matGreen.roughness = 0.5
+
+greenCubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matGreen)
+
+greenCubeNodeID = sceneBuilder.addNode('cube_green', Transform(
+    scaling=float3(0.5, 0.5, 0.5),
+    translation=float3(-1.2, 0.25, -2)
+))
+sceneBuilder.addMeshInstance(greenCubeNodeID, greenCubeMeshID)
+
+# 파란색 큐브 (플레이어 오른쪽 앞)
+matBlue = StandardMaterial('BlueCube')
+matBlue.baseColor = float4(0.1, 0.3, 0.9, 1.0)
+matBlue.roughness = 0.5
+
+blueCubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matBlue)
+
+blueCubeNodeID = sceneBuilder.addNode('cube_blue', Transform(
+    scaling=float3(0.5, 0.5, 0.5),
+    translation=float3(1.2, 0.25, -2)
+))
+sceneBuilder.addMeshInstance(blueCubeNodeID, blueCubeMeshID)
+
+# ------------------------------------------------------------
 # 5. 카메라
 # ------------------------------------------------------------
 camera = Camera('MainCamera')
@@ -99,34 +128,3 @@ dirLight.direction = float3(0, -1, 0)  # 정확히 수직 아래
 dirLight.intensity = float3(5, 5, 5)
 dirLight.angle = 0.1
 sceneBuilder.addLight(dirLight)
-
-
-'''
-# 기존 dirLight 유지
-dirLight = DistantLight('Sun')
-dirLight.direction = float3(-0.3, -1, -0.2)
-dirLight.intensity = float3(3, 3, 3)
-dirLight.angle = 0.1
-sceneBuilder.addLight(dirLight)
-
-# 아래에서 위로 올라오는 보조광 추가 (바닥 반사광 느낌)
-fillLight = DistantLight('Fill')
-fillLight.direction = float3(0.3, 1, 0.2)
-fillLight.intensity = float3(1, 1, 1)
-fillLight.angle = 0.1
-sceneBuilder.addLight(fillLight)
-
-# 점광원 대신 천장 에미시브 패널로 대체
-matCeiling = StandardMaterial('CeilingLight')
-matCeiling.emissiveColor  = float3(1.0, 1.0, 1.0)
-matCeiling.emissiveFactor = 30.0
-matCeiling.baseColor      = float4(1, 1, 1, 1)
-
-ceilMeshID = sceneBuilder.addTriangleMesh(quadMesh, matCeiling)
-ceilNodeID = sceneBuilder.addNode('ceiling_light', Transform(
-    scaling=float3(2, 1, 2),
-    translation=float3(0, 2.9, 0),
-    rotationEulerDeg=float3(-90, 0, 0)
-))
-sceneBuilder.addMeshInstance(ceilNodeID, ceilMeshID)
-'''
