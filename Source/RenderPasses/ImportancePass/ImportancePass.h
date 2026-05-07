@@ -1,12 +1,22 @@
 /***************************************************************************
  # ImportancePass.h
  #
- # Computes per-pixel importance from GBufferRT outputs (albedo, normal, depth).
- # importance = saturate(0.5 * lumVar + 0.3 * normalGrad + 0.2 * depthGrad)
+ # GBufferRT 출력으로부터 픽셀별 중요도(importance)를 계산한다.
  #
- # [디버그 출력 추가]
- # importanceVis 채널: importance 값을 grayscale RGBA8 텍스처로 시각화하여
- # RenderGraph output으로 노출한다.
+ # [입력 feature 전체 목록]
+ # - diffuseOpacity  : diffuse albedo + opacity       (RGBA32Float)
+ # - guideNormalW    : detail(shading) normal WS      (RGBA32Float)
+ # - faceNormalW     : geometry normal WS             (RGBA32Float)  ← kGBufferChannels
+ # - specRough       : specular + roughness           (RGBA32Float)  → glossiness = 1 - roughness
+ # - mvecW           : world-space motion vector      (RGBA16Float)
+ # - linearZ         : linear depth + slope           (RG32Float)
+ # - objectID        : mesh instance 고유 번호        (R32Uint)      ← 신규
+ # - luminance       : BT.601 luminance               (R32Float)     ← 신규
+ # - centerDist      : 화면 중심으로부터의 거리       (R32Float)     ← 신규
+ #
+ # [출력]
+ # - importance      : per-pixel importance [0,1]    (R32Float)
+ # - importanceVis   : grayscale 시각화              (RGBA8Unorm)
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
@@ -27,15 +37,10 @@ public:
 
     ImportancePass(ref<Device> pDevice, const Properties& props);
 
-    virtual Properties getProperties() const override;
+    virtual Properties          getProperties()  const override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
-    virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
+    virtual void                execute(RenderContext* pRenderContext, const RenderData& renderData) override;
 
 private:
     ref<ComputePass> mpComputePass;
-
-    // [디버그 시각화] importance 값을 grayscale로 표현하는 RGBA8Unorm 텍스처.
-    // RenderGraph가 직접 관리하지 않으므로 Pass가 직접 생성·소유한다.
-    // execute() 안에서 프레임 해상도가 바뀌면 재생성된다.
-    ref<Texture> mpImportanceVisTex;
 };

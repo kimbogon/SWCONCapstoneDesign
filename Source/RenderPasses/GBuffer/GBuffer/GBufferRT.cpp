@@ -58,12 +58,23 @@ const ChannelList kGBufferExtraChannels = {
     { "diffuseOpacity",             "gDiffOpacity",                 "Diffuse reflection albedo and opacity",                   true /* optional */, ResourceFormat::RGBA32Float  },
     { "specRough",                  "gSpecRough",                   "Specular reflectance and roughness",                      true /* optional */, ResourceFormat::RGBA32Float  },
     { "emissive",                   "gEmissive",                    "Emissive color",                                          true /* optional */, ResourceFormat::RGBA32Float  },
-    { "viewW",                      "gViewW",                       "View direction in world space",                           true /* optional */, ResourceFormat::RGBA32Float  }, // TODO: Switch to packed 2x16-bit snorm format.
+    { "viewW",                      "gViewW",                       "View direction in world space",                           true /* optional */, ResourceFormat::RGBA32Float  },
     { "time",                       "gTime",                        "Per-pixel execution time",                                true /* optional */, ResourceFormat::R32Uint      },
     { "disocclusion",               "gDisocclusion",                "Disocclusion mask",                                       true /* optional */, ResourceFormat::R32Float     },
     { "mask",                       "gMask",                        "Mask",                                                    true /* optional */, ResourceFormat::R32Float     },
-    // [ShadowCount] shadowCount 채널 추가 — 차폐된 광원의 수를 기록하는 uint 버퍼
+    // [ShadowCount] shadowCount 채널 — 차폐된 광원의 수를 기록하는 uint 버퍼
     { "shadowCount",                "gShadowCount",                 "Number of occluded lights per pixel",                     true /* optional */, ResourceFormat::R32Uint      },
+    // [ObjectID] 픽셀이 보는 mesh instance 고유 번호.
+    // GeometryInstanceID.index 를 직접 기록한다 (material ID 와 다름).
+    { "objectID",                   "gObjectID",                    "Geometry instance index (object ID)",                     true /* optional */, ResourceFormat::R32Uint      },
+    // [Luminance] diffuse albedo로부터 셰이더에서 계산한 luminance 값 (R32Float).
+    { "luminance",                  "gLuminance",                   "Per-pixel luminance from diffuse albedo",                 true /* optional */, ResourceFormat::R32Float     },
+    // [CenterDist] 화면 중심으로부터의 normalized 거리 [0, ~0.707] (R32Float).
+    { "centerDist",                 "gCenterDist",                  "Normalized distance from screen center",                  true /* optional */, ResourceFormat::R32Float     },
+    // [Metalness] StandardMaterial raw data 에서 읽은 metalness 원본값 [0,1] (R32Float).
+    // BSDFProperties 에는 metalness 필드가 없으므로 gScene.materials.getMaterialData() 를 통해
+    // StandardMaterial 의 packed header 에서 직접 추출한다.
+    { "metalness",                  "gMetalness",                   "Per-pixel metalness (0=dielectric, 1=conductor)",         true /* optional */, ResourceFormat::R32Float     },
     // clang-format on
 };
 } // namespace
@@ -99,7 +110,6 @@ void GBufferRT::execute(RenderContext* pRenderContext, const RenderData& renderD
     GBuffer::execute(pRenderContext, renderData);
 
     // Update frame dimension based on render pass output.
-    // In this pass all outputs are optional, so we must first find one that exists.
     ref<Texture> pOutput;
     auto findOutput = [&](const std::string& name)
     {
@@ -137,16 +147,10 @@ void GBufferRT::execute(RenderContext* pRenderContext, const RenderData& renderD
     }
 
     // Configure depth-of-field.
-    // When DOF is enabled, two PRNG dimensions are used. Pass this info to subsequent passes via the dictionary.
     mComputeDOF = mUseDOF && mpScene->getCamera()->getApertureRadius() > 0.f;
     if (mUseDOF)
     {
         renderData.getDictionary()[Falcor::kRenderPassPRNGDimension] = mComputeDOF ? 2u : 0u;
-    }
-
-    if (mLODMode == TexLODMode::RayDiffs)
-    {
-        // TODO: Remove this warning when the TexLOD code has been fixed.
     }
 
     mUseTraceRayInline ? executeCompute(pRenderContext, renderData) : executeRaytrace(pRenderContext, renderData);
@@ -156,29 +160,16 @@ void GBufferRT::execute(RenderContext* pRenderContext, const RenderData& renderD
 
 void GBufferRT::renderUI(Gui::Widgets& widget)
 {
-    // Render the base class UI first.
     GBuffer::renderUI(widget);
 
-    // Ray tracing specific options.
     if (widget.dropdown("LOD Mode", mLODMode))
-    {
         mOptionsChanged = true;
-    }
 
     if (widget.checkbox("Use TraceRayInline", mUseTraceRayInline))
-    {
         mOptionsChanged = true;
-    }
 
     if (widget.checkbox("Use depth-of-field", mUseDOF))
-    {
         mOptionsChanged = true;
-    }
-    widget.tooltip(
-        "This option enables stochastic depth-of-field when the camera's aperture radius is nonzero. "
-        "Disable it to force the use of a pinhole camera.",
-        true
-    );
 }
 
 Properties GBufferRT::getProperties() const
@@ -193,7 +184,6 @@ Properties GBufferRT::getProperties() const
 void GBufferRT::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     GBuffer::setScene(pRenderContext, pScene);
-
     recreatePrograms();
 }
 
@@ -228,7 +218,6 @@ void GBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
         defines.add(mpSampleGenerator->getDefines());
         defines.add(getShaderDefines(renderData));
 
-        // Create ray tracing program.
         ProgramDesc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kProgramRaytraceFile);
@@ -242,7 +231,6 @@ void GBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
         sbt->setMiss(0, desc.addMiss("miss"));
         sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
 
-        // Add hit group with intersection shader for displaced meshes.
         if (mpScene->hasGeometryType(Scene::GeometryType::DisplacedTriangleMesh))
         {
             sbt->setHitGroup(
@@ -252,7 +240,6 @@ void GBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
             );
         }
 
-        // Add hit group with intersection shader for curves (represented as linear swept spheres).
         if (mpScene->hasGeometryType(Scene::GeometryType::Curve))
         {
             sbt->setHitGroup(
@@ -260,7 +247,6 @@ void GBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
             );
         }
 
-        // Add hit group with intersection shader for SDF grids.
         if (mpScene->hasGeometryType(Scene::GeometryType::SDFGrid))
         {
             sbt->setHitGroup(
@@ -271,7 +257,6 @@ void GBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
         mRaytrace.pProgram = Program::create(mpDevice, desc, defines);
         mRaytrace.pVars = RtProgramVars::create(mpDevice, mRaytrace.pProgram, sbt);
 
-        // Bind static resources.
         ShaderVar var = mRaytrace.pVars->getRootVar();
         mpSampleGenerator->bindShaderData(var);
     }
@@ -281,13 +266,11 @@ void GBufferRT::executeRaytrace(RenderContext* pRenderContext, const RenderData&
     ShaderVar var = mRaytrace.pVars->getRootVar();
     bindShaderData(var, renderData);
 
-    // Dispatch the rays.
     mpScene->raytrace(pRenderContext, mRaytrace.pProgram.get(), mRaytrace.pVars, uint3(mFrameDim, 1));
 }
 
 void GBufferRT::executeCompute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    // Create compute pass.
     if (!mpComputePass)
     {
         ProgramDesc desc;
@@ -302,7 +285,6 @@ void GBufferRT::executeCompute(RenderContext* pRenderContext, const RenderData& 
 
         mpComputePass = ComputePass::create(mpDevice, desc, defines, true);
 
-        // Bind static resources
         ShaderVar var = mpComputePass->getRootVar();
         mpScene->bindShaderDataForRaytracing(pRenderContext, var["gScene"]);
         mpSampleGenerator->bindShaderData(var);
@@ -324,7 +306,6 @@ DefineList GBufferRT::getShaderDefines(const RenderData& renderData) const
     defines.add("LOD_MODE", std::to_string((uint32_t)mLODMode));
     defines.add("ADJUST_SHADING_NORMALS", mAdjustShadingNormals ? "1" : "0");
 
-    // Setup ray flags.
     RayFlags rayFlags = RayFlags::None;
     if (mForceCullMode && mCullMode == RasterizerState::CullMode::Front)
         rayFlags = RayFlags::CullFrontFacingTriangles;
@@ -332,8 +313,6 @@ DefineList GBufferRT::getShaderDefines(const RenderData& renderData) const
         rayFlags = RayFlags::CullBackFacingTriangles;
     defines.add("RAY_FLAGS", std::to_string((uint32_t)rayFlags));
 
-    // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
-    // TODO: This should be moved to a more general mechanism using Slang.
     defines.add(getValidResourceDefines(kGBufferChannels, renderData));
     defines.add(getValidResourceDefines(kGBufferExtraChannels, renderData));
     return defines;
