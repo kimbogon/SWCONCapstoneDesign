@@ -1,22 +1,8 @@
 /***************************************************************************
  # ImportancePass.cs.slang
- #
- # GBufferRT 의 모든 feature 를 입력으로 받아 픽셀별 중요도를 계산한다.
- #
- # importance = saturate(0.5 * lumVar + 0.3 * normalGrad + 0.2 * depthGrad)
- # (기존 계산 로직 유지 — 새 feature 는 접근 가능하나 아직 가중치에 반영하지 않음)
- #
- # [새로 접근 가능한 feature]
- # - gFaceNormalW   : geometry normal (HAS_FACE_NORMAL)
- # - gSpecRough     : specular + roughness  (HAS_SPEC_ROUGH)
- #                    glossiness = 1 - specRough.a
- # - gMotionVectorW : world-space motion vector (HAS_MOTION_VECTOR_W)
- # - gObjectID      : mesh instance index (HAS_OBJECT_ID)
- # - gLuminanceTex  : pre-computed luminance (HAS_LUMINANCE)
- # - gCenterDist    : screen-center distance (HAS_CENTER_DIST)
- **************************************************************************/
-
-// ---- guard defines (ImportancePass.cpp 에서 주입; 컴파일 단독 실행 시 fallback) ----
+ # 1단계: max(albedoVar, geoNormVar, detailNormVar, metalness, glossiness)
+ # 2단계: task override -> center weight -> luminance penalty -> motion penalty
+ ***************************************************************************/
 #ifndef HAS_DIFFUSE_OPACITY
 #define HAS_DIFFUSE_OPACITY 0
 #endif
@@ -47,240 +33,305 @@
 #ifndef HAS_CENTER_DIST
 #define HAS_CENTER_DIST 0
 #endif
+#ifndef HAS_METALNESS
+#define HAS_METALNESS 0
+#endif
 #ifndef HAS_IMPORTANCE_VIS
 #define HAS_IMPORTANCE_VIS 0
 #endif
 
-// ---- constant buffer ----
 cbuffer CB
 {
-    uint2 frameDim;
+    uint2  frameDim;
+    float2 invFrameDim;
+    uint   activeTask;          // 0:None 1:Aim 2:Point 3:Steer
+    uint   debugView;           // 0:Imp 1:TaskOverlay 2:ImgOnly 3:TaskOnly
+    uint   hasImportanceVis;
+    uint   _pad0;
+    float2 centerUV;
+    float  centerRadiusUV;
+    float  taskImportance;
+    float  enemyRedThreshold;
+    float  itemGBThreshold;
+    float  lumLow;
+    float  lumHigh;
+    float  motionA;
+    float  motionB;
+    float  motionC;
+    float  centerWeightMin;
+    float  steerFloorY;
+    float  _pad1;
+    float  _pad2;
+    float  _pad3;
 };
 
-// ---- 입력 텍스처 ----
-Texture2D<float4> gDiffuseOpacity;   // diffuse albedo + opacity  (RGBA32Float)
-Texture2D<float4> gGuideNormalW;     // detail(shading) normal WS (RGBA32Float)
-Texture2D<float4> gFaceNormalW;      // geometry normal WS        (RGBA32Float)  [신규]
-Texture2D<float4> gSpecRough;        // specular(RGB) + rough(A)  (RGBA32Float)  [신규]
-Texture2D<float4> gMotionVectorW;    // world-space motion vector (RGBA16Float)  [신규]
-Texture2D<float2> gLinearZ;          // linear depth + slope      (RG32Float)
-Texture2D<uint>   gShadowCount;      // occluded light count      (R32Uint)
-Texture2D<uint>   gObjectID;         // mesh instance index       (R32Uint)      [신규]
-Texture2D<float>  gLuminanceTex;     // pre-computed luminance    (R32Float)     [신규]
-Texture2D<float>  gCenterDist;       // screen-center distance    (R32Float)     [신규]
+Texture2D<float4> gDiffuseOpacity;
+Texture2D<float4> gGuideNormalW;
+Texture2D<float4> gFaceNormalW;
+Texture2D<float4> gSpecRough;
+Texture2D<float4> gMotionVectorW;
+Texture2D<float4> gLinearZ;
+Texture2D<uint>   gShadowCount;
+Texture2D<uint>   gObjectID;
+Texture2D<float>  gLuminanceTex;
+Texture2D<float>  gCenterDist;
+Texture2D<float>  gMetalness;
 
-// ---- 출력 텍스처 ----
-RWTexture2D<float>  gImportance;     // per-pixel importance [0,1] (R32Float)
-RWTexture2D<float4> gImportanceVis;  // grayscale visualization    (RGBA8Unorm)
+RWTexture2D<float>  gImportance;
+RWTexture2D<float4> gImportanceVis;
+RWStructuredBuffer<uint> gCenterCategory; // 1 element: 0/1/2
 
-// ============================================================
-// 샘플 헬퍼 함수
-// ============================================================
-
-// BT.601 luminance (diffuse albedo 에서 계산; gLuminanceTex 미연결 시 fallback)
-float luminance(float3 c)
+// ---------- helpers ----------
+int2 clampP(int2 p)
 {
-    return dot(c, float3(0.299f, 0.587f, 0.114f));
+    return clamp(p, int2(0, 0), int2(frameDim) - int2(1, 1));
 }
 
-float sampleLuminance(int2 p)
+float lum601(float3 c) { return dot(c, float3(0.299f, 0.587f, 0.114f)); }
+
+float3 sampleAlbedo(int2 p)
 {
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-#if HAS_LUMINANCE
-    // GBufferRT 에서 미리 계산된 luminance 를 우선 사용한다.
-    return gLuminanceTex[p];
-#elif HAS_DIFFUSE_OPACITY
-    return luminance(gDiffuseOpacity[p].rgb);
+#if HAS_DIFFUSE_OPACITY
+    return gDiffuseOpacity[clampP(p)].rgb;
 #else
-    return 0.f;
+    return float3(0.f, 0.f, 0.f);
 #endif
 }
 
-float3 sampleGuideNormal(int2 p)
+float3 sampleGuideN(int2 p)
 {
 #if HAS_GUIDE_NORMAL
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-    return gGuideNormalW[p].xyz;
+    return gGuideNormalW[clampP(p)].xyz;
 #else
     return float3(0.f, 0.f, 1.f);
 #endif
 }
 
-// [FaceNormal] geometry normal 샘플 헬퍼.
-float3 sampleFaceNormal(int2 p)
+float3 sampleFaceN(int2 p)
 {
 #if HAS_FACE_NORMAL
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-    return gFaceNormalW[p].xyz;
+    return gFaceNormalW[clampP(p)].xyz;
 #else
     return float3(0.f, 0.f, 1.f);
 #endif
 }
 
-float sampleDepth(int2 p)
-{
-#if HAS_LINEAR_Z
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-    return gLinearZ[p].x;
-#else
-    return 0.f;
-#endif
-}
-
-// [ShadowCount] shadow count 샘플 헬퍼.
-uint sampleShadowCount(int2 p)
-{
-#if HAS_SHADOW_COUNT
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-    return gShadowCount[p];
-#else
-    return 0u;
-#endif
-}
-
-// [SpecRough] roughness 샘플 헬퍼. glossiness = 1 - roughness.
-float sampleRoughness(int2 p)
+float sampleRough(int2 p)
 {
 #if HAS_SPEC_ROUGH
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-    return gSpecRough[p].a;
+    return saturate(gSpecRough[clampP(p)].a);
+#else
+    return 1.f;
+#endif
+}
+
+float sampleMet(int2 p)
+{
+#if HAS_METALNESS
+    return saturate(gMetalness[clampP(p)]);
 #else
     return 0.f;
 #endif
 }
 
-// [MotionVectorW] world-space motion vector 의 크기를 반환한다.
-float sampleMotionMagnitude(int2 p)
+float sampleLum(int2 p)
+{
+#if HAS_LUMINANCE
+    return gLuminanceTex[clampP(p)];
+#elif HAS_DIFFUSE_OPACITY
+    return lum601(gDiffuseOpacity[clampP(p)].rgb);
+#else
+    return 0.f;
+#endif
+}
+
+float sampleMotion(int2 p)
 {
 #if HAS_MOTION_VECTOR_W
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-    return length(gMotionVectorW[p].xyz);
+    return length(gMotionVectorW[clampP(p)].xyz);
 #else
     return 0.f;
 #endif
 }
 
-// [ObjectID] object ID 샘플 헬퍼. 배경(miss)은 0xFFFFFFFF.
-uint sampleObjectID(int2 p)
-{
-#if HAS_OBJ_ID
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-    return gObjectID[p];
-#else
-    return 0u;
-#endif
-}
-
-// [CenterDist] 화면 중심 거리 샘플 헬퍼. [0, ~0.707].
-float sampleCenterDist(int2 p)
+float sampleCDist(int2 p)
 {
 #if HAS_CENTER_DIST
-    p = clamp(p, int2(0), int2(frameDim) - 1);
-    return gCenterDist[p];
+    return gCenterDist[clampP(p)];
 #else
-    return 0.f;
+    float2 uv = (float2(p) + 0.5f) * invFrameDim;
+    return length(uv - float2(0.5f, 0.5f));
 #endif
 }
 
-// ============================================================
-// 메인 커널
-// ============================================================
+// 3x3 scalar variance (population)
+float scalarVar3x3(int2 p, bool useAlbedo)
+{
+    float s = 0.f;
+    float ss = 0.f;
+    [unroll]
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        [unroll]
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            float v = useAlbedo
+                ? lum601(sampleAlbedo(p + int2(dx, dy)))
+                : sampleMet(p + int2(dx, dy));
+            s  += v;
+            ss += v * v;
+        }
+    }
+    float mean = s / 9.f;
+    float var  = max(ss / 9.f - mean * mean, 0.f);
+    return saturate(var * 4.f); // scale to [0,1] range
+}
+
+// 3x3 normal variance: mean(1 - |dot(n_i, n_center)|)
+float normalVar3x3(int2 p, bool useGuide)
+{
+    float3 nc = useGuide ? sampleGuideN(p) : sampleFaceN(p);
+    nc = normalize(nc + float3(0.f, 0.f, 1e-6f)); // guard zero-length
+    float acc = 0.f;
+    [unroll]
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        [unroll]
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            if (dx == 0 && dy == 0) continue;
+            float3 ni = useGuide
+                ? sampleGuideN(p + int2(dx, dy))
+                : sampleFaceN(p + int2(dx, dy));
+            ni = normalize(ni + float3(0.f, 0.f, 1e-6f));
+            acc += 1.f - abs(dot(nc, ni));
+        }
+    }
+    return saturate(acc / 8.f);
+}
+
+// task-aware overlay color heuristic (per pixel, GPU side)
+bool isEnemyColor(float3 c)
+{
+    float maxC = max(c.r, max(c.g, c.b)) + 1e-6f;
+    return (c.r > enemyRedThreshold) && ((c.r / maxC) > 0.9f) && (c.g < (c.r * 0.4f));
+}
+
+bool isItemColor(float3 c)
+{
+    float maxC = max(c.r, max(c.g, c.b)) + 1e-6f;
+    bool greenDom = (c.g > itemGBThreshold) && ((c.g / maxC) > 0.9f) && (c.r < (c.g * 0.4f));
+    bool blueDom  = (c.b > itemGBThreshold) && ((c.b / maxC) > 0.9f) && (c.r < (c.b * 0.4f));
+    return greenDom || blueDom;
+}
+
 [numthreads(16, 16, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 pixel = dispatchThreadId.xy;
-    if (any(pixel >= frameDim))
-        return;
-
+    if (any(pixel >= frameDim)) return;
     int2 p = int2(pixel);
+    float2 uv = (float2(pixel) + 0.5f) * invFrameDim;
 
-    // ---- luminance variance (3×3 neighborhood) ----
-    // HAS_LUMINANCE 또는 HAS_DIFFUSE_OPACITY 중 하나라도 있으면 계산한다.
-    float lumVar = 0.f;
-#if HAS_LUMINANCE || HAS_DIFFUSE_OPACITY
+    // ---- 중심 픽셀 색상 카테고리 기록 (스레드 (0,0) 만) ----
+    if (all(pixel == uint2(0u, 0u)))
     {
-        float sum   = 0.f;
-        float sumSq = 0.f;
-        [unroll]
-        for (int dy = -1; dy <= 1; dy++)
-        {
-            [unroll]
-            for (int dx = -1; dx <= 1; dx++)
-            {
-                float l = sampleLuminance(p + int2(dx, dy));
-                sum   += l;
-                sumSq += l * l;
-            }
-        }
-        float mean     = sum / 9.f;
-        float variance = max(0.f, sumSq / 9.f - mean * mean);
-        lumVar = saturate(sqrt(variance) * 4.f);
+        int2 cp = int2(centerUV * float2(frameDim));
+        float3 cc = sampleAlbedo(cp);
+        uint cat = 0u;
+        if (isEnemyColor(cc))      cat = 1u;
+        else if (isItemColor(cc))  cat = 2u;
+        gCenterCategory[0] = cat;
     }
-#endif
 
-    // ---- normal gradient (4-neighbor, guide normal 우선) ----
-    float normalGrad = 0.f;
-#if HAS_GUIDE_NORMAL
+    // =========================================================
+    // 1단계 (1): Image-space max-variance importance
+    // =========================================================
+    float albedoVar  = scalarVar3x3(p, true);
+    float metVar     = scalarVar3x3(p, false);
+    float guideNVar  = normalVar3x3(p, true);
+    float faceNVar   = normalVar3x3(p, false);
+    float glossiness = 1.f - sampleRough(p);  // rough=1 -> gloss=0
+
+    float imageImp = max(albedoVar,
+                    max(metVar,
+                    max(guideNVar,
+                    max(faceNVar, glossiness))));
+
+    // =========================================================
+    // 1단계 (2): Task-Object space importance
+    // =========================================================
+    float taskImp = 0.f;
+
+    if (activeTask == 1u) // Aiming: center region
     {
-        float3 nc = sampleGuideNormal(p);
-        float d   = 0.f;
-        d += length(nc - sampleGuideNormal(p + int2(-1,  0)));
-        d += length(nc - sampleGuideNormal(p + int2( 1,  0)));
-        d += length(nc - sampleGuideNormal(p + int2( 0, -1)));
-        d += length(nc - sampleGuideNormal(p + int2( 0,  1)));
-        normalGrad = saturate(d / 4.f);
+        float dist = length(uv - centerUV);
+        if (dist < centerRadiusUV) taskImp = taskImportance;
     }
-#endif
-
-    // ---- depth gradient (4-neighbor, relative) ----
-    float depthGrad = 0.f;
-#if HAS_LINEAR_Z
+    else if (activeTask == 2u) // Pointing: center region (item)
     {
-        float zc = sampleDepth(p);
-        if (zc > 0.f)
-        {
-            float d = 0.f;
-            d += abs(zc - sampleDepth(p + int2(-1,  0)));
-            d += abs(zc - sampleDepth(p + int2( 1,  0)));
-            d += abs(zc - sampleDepth(p + int2( 0, -1)));
-            d += abs(zc - sampleDepth(p + int2( 0,  1)));
-            depthGrad = saturate((d / 4.f) / zc * 10.f);
-        }
+        float dist = length(uv - centerUV);
+        if (dist < centerRadiusUV) taskImp = taskImportance;
     }
-#endif
+    else if (activeTask == 3u) // Steering: lower screen region
+    {
+        bool steerRegion = (uv.y > steerFloorY);
+        if (steerRegion) taskImp = taskImportance;
+    }
 
-    // ============================================================
-    // 아래 변수들은 현재 importance 계산 식에는 포함되지 않지만
-    // 모두 접근 가능하다. 가중치 조정 시 바로 활용할 수 있다.
-    // ============================================================
+    // ---- max(image, task) ----
+    float importance = max(imageImp, taskImp);
 
-    // [FaceNormal] geometry normal — detail normal 과의 차이로 범프 강도 파악 가능
-    // float3 faceN = sampleFaceNormal(p);
+    // =========================================================
+    // 2단계 (A): Center weighting  (center=1.0, edge=min)
+    //   centerDist in [0, ~0.707]
+    // =========================================================
+    float cd = sampleCDist(p);
+    float t  = saturate(cd / 0.7071068f);
+    float centerW = lerp(1.f, centerWeightMin, t);
+    importance *= centerW;
 
-    // [SpecRough] roughness / glossiness — 반사성 소재 강조 등에 사용 가능
-    // float roughness  = sampleRoughness(p);
-    // float glossiness = 1.f - roughness;
+    // =========================================================
+    // 2단계 (B): Luminance penalty
+    // =========================================================
+    float L = sampleLum(p);
+    if (L < lumLow)
+        importance *= saturate(L / max(lumLow, 1e-4f));
+    else if (L > lumHigh)
+        importance *= saturate((1.f - L) / max(1.f - lumHigh, 1e-4f));
 
-    // [MotionVectorW] motion magnitude — 빠르게 움직이는 영역에 샘플 집중 가능
-    // float motion = sampleMotionMagnitude(p);
+    // =========================================================
+    // 2단계 (C): Motion penalty
+    //   w = (1 / (1 + (A*v)^B))^C
+    // =========================================================
+    float v   = sampleMotion(p);
+    float av  = max(motionA * v, 0.f);
+    float denom = 1.f + pow(av + 1e-6f, motionB);
+    float mw  = pow(max(1.f / denom, 1e-6f), motionC);
+    importance *= mw;
 
-    // [ShadowCount] 그림자 영역 강조 가능
-    // uint sc = sampleShadowCount(p);
+    importance = saturate(importance);
 
-    // [ObjectID] 오브젝트 경계 검출 (인접 픽셀과 ID 비교)
-    // uint oid = sampleObjectID(p);
+    // ---- debug view selection ----
+    float outScalar = importance;
+    if (debugView == 2u)      outScalar = saturate(imageImp);
+    else if (debugView == 3u) outScalar = saturate(taskImp);
 
-    // [CenterDist] 화면 주변부/중심부 차별화 샘플링 가능
-    // float cd = sampleCenterDist(p);
-
-    // ---- importance 최종 계산 (기존 수식 유지) ----
-    float importance = saturate(0.5f * lumVar + 0.3f * normalGrad + 0.2f * depthGrad);
-
-    // ---- 출력 ----
-    gImportance[pixel] = importance;
+    gImportance[pixel] = outScalar;
 
 #if HAS_IMPORTANCE_VIS
-    // grayscale 시각화: importance 가 클수록 밝게(흰색)
-    gImportanceVis[pixel] = float4(importance, importance, importance, 1.f);
+    if (hasImportanceVis != 0u)
+    {
+        float3 col = float3(outScalar, outScalar, outScalar);
+        if (debugView == 1u) // task overlay
+        {
+            float3 tint = float3(1.f, 1.f, 1.f);
+            if      (activeTask == 1u) tint = float3(1.0f, 0.2f, 0.2f); // Aim: red
+            else if (activeTask == 2u) tint = float3(0.2f, 1.0f, 0.4f); // Point: green
+            else if (activeTask == 3u) tint = float3(0.3f, 0.6f, 1.0f); // Steer: blue
+            col = lerp(float3(outScalar, outScalar, outScalar), tint, taskImp * 0.7f);
+        }
+        gImportanceVis[pixel] = float4(col, 1.f);
+    }
 #endif
 }

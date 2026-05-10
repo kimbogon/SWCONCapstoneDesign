@@ -3,93 +3,104 @@ from falcor import *
 # ------------------------------------------------------------
 # 1. 메시 생성
 # ------------------------------------------------------------
-quadMesh   = TriangleMesh.createQuad()
-cubeMesh   = TriangleMesh.createCube()
+quadMesh   = TriangleMesh.createQuad() # 2D 평면
+cubeMesh   = TriangleMesh.createCube() # 3D 입체
+sphereMesh   = TriangleMesh.createSphere(radius=0.4)
 
 # ------------------------------------------------------------
 # 2. 머티리얼 생성
 # ------------------------------------------------------------
-matFloor = StandardMaterial('Floor')
-matFloor.baseColor = float4(0.6, 0.6, 0.6, 1.0)
-matFloor.roughness = 0.8
+matFloor = StandardMaterial('Floor')            # 머터리얼 객체 선언
+matFloor.baseColor = float4(0.6, 0.6, 0.6, 1.0) # baseColor 속성 지정
+matFloor.roughness = 0.8                        # roughness 속성 지정
 
 matWall = StandardMaterial('Wall')
 matWall.baseColor = float4(0.7, 0.7, 0.7, 1.0)
 matWall.roughness = 0.9
 
-# ------------------------------------------------------------
-# 3. 메시를 SceneBuilder에 등록
-# ------------------------------------------------------------
-quadMeshID = sceneBuilder.addTriangleMesh(quadMesh, matFloor)
-cubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matWall)
-
-# ------------------------------------------------------------
-# 4. 노드 추가 + 메시 인스턴스 연결
-# ------------------------------------------------------------
-
-# 바닥 
-# floorMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matFloor)
-floorNodeID = sceneBuilder.addNode('floor', Transform(
-    scaling=float3(20, 0.1, 20),
-    translation=float3(0, 0, 0)
-))
-sceneBuilder.addMeshInstance(floorNodeID, quadMeshID)
-
-# 왼쪽 벽
-wallLNodeID = sceneBuilder.addNode('wall_left', Transform(
-    scaling=float3(0.2, 3, 20),
-    translation=float3(-3, 1.5, 0)
-))
-sceneBuilder.addMeshInstance(wallLNodeID, cubeMeshID)
-
-# 오른쪽 벽
-wallRNodeID = sceneBuilder.addNode('wall_right', Transform(
-    scaling=float3(0.2, 3, 20),
-    translation=float3(3, 1.5, 0)
-))
-sceneBuilder.addMeshInstance(wallRNodeID, cubeMeshID)
-
-# 뒤 벽
-wallBNodeID = sceneBuilder.addNode('wall_back', Transform(
-    scaling=float3(6, 3, 0.2),
-    translation=float3(0, 1.5, -10)
-))
-sceneBuilder.addMeshInstance(wallBNodeID, cubeMeshID)
-
-# 코너 벽
-cornerNodeID = sceneBuilder.addNode('corner_wall', Transform(
-    scaling=float3(6, 3, 0.2),
-    translation=float3(0, 1.5, 5)
-))
-sceneBuilder.addMeshInstance(cornerNodeID, cubeMeshID)
-
-# 구형 적 오브젝트
-# 카메라: position=(0,1.7,-5), target=(0,1.7,0), focalLength=21
-# z=2 에 배치하면 카메라 정면 시야 중앙에 위치
-# 벽이 x=-3 ~ x=3 이므로 좌우 진폭은 ±1.8 으로 여유있게 설정
 matEnemy = StandardMaterial('Enemy')
 matEnemy.baseColor = float4(0.9, 0.2, 0.2, 1.0)   # 빨간 구
 matEnemy.roughness = 0.3
 matEnemy.metallic  = 0.6
 
-sphereMesh   = TriangleMesh.createSphere(radius=0.4)
-sphereMeshID = sceneBuilder.addTriangleMesh(sphereMesh, matEnemy)
-
-# 초기 위치: 중앙, 눈높이(y=1.7), z=2 (카메라 정면)
-enemyNodeID = sceneBuilder.addNode('enemy', Transform(translation=float3(0, 1.7, 2)))
-sceneBuilder.addMeshInstance(enemyNodeID, sphereMeshID)
-
-
-# ------------------------------------------------------------
-# 초록색 큐브 (플레이어 왼쪽 앞)
-# 카메라: position=(0,1.7,-5), target 방향(+z) 기준
-# 왼쪽(-x), 앞쪽(+z) 에 배치
 matGreen = StandardMaterial('GreenCube')
 matGreen.baseColor = float4(0.1, 0.8, 0.2, 1.0)
 matGreen.roughness = 0.5
 
-greenCubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matGreen)
+matBlue = StandardMaterial('BlueCube')
+matBlue.baseColor = float4(0.1, 0.3, 0.9, 1.0)
+matBlue.roughness = 0.5
 
+# ------------------------------------------------------------
+# 3. 메시를 SceneBuilder에 등록
+# ------------------------------------------------------------
+floorMeshID = sceneBuilder.addTriangleMesh(quadMesh, matFloor) # 메시 + 머터리얼을 인자로 넣어 등록
+wallMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matWall)
+sphereMeshID = sceneBuilder.addTriangleMesh(sphereMesh, matEnemy)
+greenCubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matGreen)
+blueCubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matBlue)
+
+# ------------------------------------------------------------
+# 4. 노드 추가 + 메시 인스턴스 연결
+# ------------------------------------------------------------
+# 노드는 Transform을 지정
+# Node ID + Mesh ID를 인자로 넣어 메시를 씬에 추가
+
+# 바닥 
+floorNodeID = sceneBuilder.addNode('floor', Transform(
+    scaling=float3(20, 0.1, 20),
+    translation=float3(0, 0, 0)
+))
+sceneBuilder.addMeshInstance(floorNodeID, floorMeshID)
+
+# 왼쪽 벽
+wallLNodeID = sceneBuilder.addNode('wall_left', Transform(
+    scaling=float3(0.2, 3, 20),
+    translation=float3(-10, 1.5, 0)
+))
+sceneBuilder.addMeshInstance(wallLNodeID, wallMeshID)
+
+# 오른쪽 벽
+wallRNodeID = sceneBuilder.addNode('wall_right', Transform(
+    scaling=float3(0.2, 3, 20),
+    translation=float3(10, 1.5, 0)
+))
+sceneBuilder.addMeshInstance(wallRNodeID, wallMeshID)
+
+# 뒤 벽
+wallBNodeID = sceneBuilder.addNode('wall_back', Transform(
+    scaling=float3(20, 3, 0.2),
+    translation=float3(0, 1.5, -10)
+))
+sceneBuilder.addMeshInstance(wallBNodeID, wallMeshID)
+
+# 코너 벽
+cornerNodeID = sceneBuilder.addNode('corner_wall', Transform(
+    scaling=float3(20, 3, 0.2),
+    translation=float3(0, 1.5, 10)
+))
+sceneBuilder.addMeshInstance(cornerNodeID, wallMeshID)
+
+# 펜스
+fenceNodeID = sceneBuilder.addNode('fence', Transform(
+    scaling=float3(20, 1, 1),
+    translation=float3(0, 0, 0)
+))
+sceneBuilder.addMeshInstance(fenceNodeID, wallMeshID)
+
+# 구형 적 오브젝트
+# 카메라: position=(0,1.7,-5), target=(0,1.7,0), focalLength=21
+# z=2 에 배치하면 카메라 정면 시야 중앙에 위치
+# 벽이 x=-3 ~ x=3 이므로 좌우 진폭은 ±1.8 으로 여유있게 설정
+# 초기 위치: 중앙, 눈높이(y=1.7), z=2 (카메라 정면)
+enemyNodeID = sceneBuilder.addNode('enemy', Transform(
+    translation=float3(0, 1.7, 2)
+))
+sceneBuilder.addMeshInstance(enemyNodeID, sphereMeshID)
+
+# 초록색 큐브 (플레이어 왼쪽 앞)
+# 카메라: position=(0,1.7,-5), target 방향(+z) 기준
+# 왼쪽(-x), 앞쪽(+z) 에 배치
 greenCubeNodeID = sceneBuilder.addNode('cube_green', Transform(
     scaling=float3(0.5, 0.5, 0.5),
     translation=float3(-1.2, 0.25, -2)
@@ -97,12 +108,6 @@ greenCubeNodeID = sceneBuilder.addNode('cube_green', Transform(
 sceneBuilder.addMeshInstance(greenCubeNodeID, greenCubeMeshID)
 
 # 파란색 큐브 (플레이어 오른쪽 앞)
-matBlue = StandardMaterial('BlueCube')
-matBlue.baseColor = float4(0.1, 0.3, 0.9, 1.0)
-matBlue.roughness = 0.5
-
-blueCubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matBlue)
-
 blueCubeNodeID = sceneBuilder.addNode('cube_blue', Transform(
     scaling=float3(0.5, 0.5, 0.5),
     translation=float3(1.2, 0.25, -2)
