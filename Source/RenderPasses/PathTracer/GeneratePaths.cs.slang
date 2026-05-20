@@ -262,7 +262,7 @@ cbuffer CB
 }
 
 // TODO: Replace by compile-time uint2 constant when it works in Slang.
-[numthreads(256 /* kScreenTileDim.x * kScreenTileDim.y */, 1, 1)]
+[numthreads(256 /* kScreenTileDim.x * kScreenTileDim.y, 16x16 */, 1, 1)]
 void main(
     uint3 groupID : SV_GroupID,
     uint3 groupThreadID : SV_GroupThreadID)

@@ -133,3 +133,30 @@ dirLight.direction = float3(0, -1, 0)  # 정확히 수직 아래
 dirLight.intensity = float3(5, 5, 5)
 dirLight.angle = 0.1
 sceneBuilder.addLight(dirLight)
+
+# ------------------------------------------------------------
+# 7. 오브젝트 애니메이션 (2-2)
+# ------------------------------------------------------------
+
+# 적 구체: x축으로 좌우 왕복 (-1.8 ~ +1.8), 4초 주기
+enemyAnim = Animation("enemy_patrol", enemyNodeID, 4.0)
+enemyAnim.postInfinityBehavior = Animation.Behavior.Cycle
+enemyAnim.interpolationMode = Animation.InterpolationMode.Linear
+enemyAnim.addKeyframe(0.0, Transform(translation=float3( 0.0, 1.7, 2.0)))
+enemyAnim.addKeyframe(2.0, Transform(translation=float3( 1.8, 1.7, 2.0)))
+enemyAnim.addKeyframe(4.0, Transform(translation=float3( 0.0, 1.7, 2.0)))
+sceneBuilder.addAnimation(enemyAnim)
+
+# ------------------------------------------------------------
+# 8. 카메라 자동 궤적 
+# ------------------------------------------------------------
+# 10초 주기로 카메라가 좌우로 이동하며 적 오브젝트(z=2) 를 향해 조준하는 궤적
+_up = float3(0, 1, 0)
+_enemyPos = float3(0, 1.7, 2)
+camAnim = sceneBuilder.createAnimation(camera, "cam_trajectory", 10.0)
+camAnim.postInfinityBehavior = Animation.Behavior.Cycle
+camAnim.addKeyframe(0.0,  Transform(position=float3( 0, 1.7, -5), target=_enemyPos, up=_up))
+camAnim.addKeyframe(2.5,  Transform(position=float3( 3, 1.7, -4), target=_enemyPos, up=_up))
+camAnim.addKeyframe(5.0,  Transform(position=float3( 0, 1.7, -5), target=_enemyPos, up=_up))
+camAnim.addKeyframe(7.5,  Transform(position=float3(-3, 1.7, -4), target=_enemyPos, up=_up))
+camAnim.addKeyframe(10.0, Transform(position=float3( 0, 1.7, -5), target=_enemyPos, up=_up))
