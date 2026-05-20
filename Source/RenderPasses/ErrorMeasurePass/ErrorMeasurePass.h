@@ -64,6 +64,7 @@ public:
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
+    virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
 
 private:
     bool loadReference();
@@ -131,6 +132,16 @@ private:
 
     // private 멤버 변수 섹션에 추가
     uint32_t mFrameIndex = 0; ///< CSV 기록용 프레임 카운터 [요구사항 4]
+    uint32_t mCameraFrameIndex = 0; ///< 카메라 CSV 전용 프레임 카운터
+
+    // 카메라 궤적 기록
+    bool loadCameraRecordFile();
+    void recordCameraToFile();
+
+    ref<Scene> mpScene;
+    bool mRecordCamera = false;
+    std::ofstream mCameraRecordFile;
+    std::filesystem::path mCameraRecordFilePath;
 };
 
 FALCOR_ENUM_REGISTER(ErrorMeasurePass::OutputId);

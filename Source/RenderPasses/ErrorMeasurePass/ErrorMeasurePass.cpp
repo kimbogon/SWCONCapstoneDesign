@@ -156,6 +156,7 @@ void ErrorMeasurePass::execute(RenderContext* pRenderContext, const RenderData& 
     {
         // We don't have a reference image, so just copy the source image to the output.
         pRenderContext->blit(pSourceImageTexture->getSRV(), pOutputImageTexture->getRTV());
+        recordCameraToFile();
         return;
     }
 
@@ -172,6 +173,7 @@ void ErrorMeasurePass::execute(RenderContext* pRenderContext, const RenderData& 
                 width, height, refW, refH
             );
             pRenderContext->blit(pSourceImageTexture->getSRV(), pOutputImageTexture->getRTV());
+            recordCameraToFile();
             return;
         }
     }
@@ -195,6 +197,7 @@ void ErrorMeasurePass::execute(RenderContext* pRenderContext, const RenderData& 
     }
 
     saveMeasurementsToFile();
+    recordCameraToFile();
 }
 
 void ErrorMeasurePass::runDifferencePass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -395,6 +398,34 @@ void ErrorMeasurePass::renderUI(Gui::Widgets& widget)
     {
         widget.text("Error: N/A");
     }
+
+    // 카메라 궤적 기록 UI
+    widget.separator();
+    widget.text("Camera Recording");
+
+    if (widget.button("Set camera record file"))
+    {
+        FileDialogFilterVec filters;
+        filters.push_back({"csv", "CSV Files"});
+        std::filesystem::path path;
+        if (saveFileDialog(filters, path))
+        {
+            mCameraRecordFilePath = path;
+            if (!loadCameraRecordFile())
+                msgBox("Error", fmt::format("Failed to open camera record file '{}'.", path), MsgBoxType::Ok, MsgBoxIcon::Error);
+        }
+    }
+
+    const std::string camFileText = "File: " + (mCameraRecordFilePath.empty() ? "N/A" : mCameraRecordFilePath.filename().string());
+    widget.text(camFileText);
+    if (!mCameraRecordFilePath.empty())
+        widget.tooltip(mCameraRecordFilePath.string());
+
+    // 파일이 지정되지 않은 상태에서는 토글 비활성화
+    if (mCameraRecordFilePath.empty())
+        widget.text("(Set a file to enable recording)");
+    else
+        widget.checkbox("Record camera", mRecordCamera);
 }
 
 bool ErrorMeasurePass::onKeyEvent(const KeyboardEvent& keyEvent)
@@ -490,4 +521,43 @@ void ErrorMeasurePass::saveMeasurementsToFile()
 
     // 프레임 카운터 증가
     ++mFrameIndex;
+}
+
+void ErrorMeasurePass::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
+{
+    mpScene = pScene;
+}
+
+bool ErrorMeasurePass::loadCameraRecordFile()
+{
+    if (mCameraRecordFilePath.empty())
+        return false;
+
+    mCameraRecordFile = std::ofstream(mCameraRecordFilePath, std::ios::trunc);
+    if (!mCameraRecordFile)
+    {
+        logWarning("ErrorMeasurePass: Failed to open camera record file '{}'.", mCameraRecordFilePath);
+        mCameraRecordFilePath.clear();
+        return false;
+    }
+
+    mCameraRecordFile << "frame,pos_x,pos_y,pos_z,target_x,target_y,target_z,up_x,up_y,up_z" << std::endl;
+    return true;
+}
+
+void ErrorMeasurePass::recordCameraToFile()
+{
+    if (!mRecordCamera || !mCameraRecordFile || !mpScene)
+        return;
+
+    const auto& pCamera = mpScene->getCamera();
+    float3 pos = pCamera->getPosition();
+    float3 target = pCamera->getTarget();
+    float3 up = pCamera->getUpVector();
+
+    mCameraRecordFile << mCameraFrameIndex << "," // mFrameIndex → mCameraFrameIndex로 변경
+                      << pos.x << "," << pos.y << "," << pos.z << "," << target.x << "," << target.y << "," << target.z << "," << up.x
+                      << "," << up.y << "," << up.z << std::endl;
+
+    ++mCameraFrameIndex; // 카메라 전용 카운터 증가
 }
