@@ -54,6 +54,14 @@ const std::string kReportRunningError = "ReportRunningError";
 const std::string kRunningErrorSigma = "RunningErrorSigma";
 const std::string kSelectedOutputId = "SelectedOutputId";
 
+
+// 카메라 기록 고정 경로 (비워두면 UI 수동 지정 방식으로 동작)
+const std::filesystem::path kDefaultCameraRecordPath = "C:/Users/bg001/Desktop/Falcor/Results/camera_record.csv"; 
+
+// 앱 시작 시 자동으로 기록 시작할지 여부
+const bool kAutoStartCameraRecord = true;
+
+
 // [요구사항 5-3] MSE=0 시 PSNR 상한 클램프 값 (inf 방지)
 constexpr float kPSNRMax = 999.0f;
 // MSE가 이 값 이하면 최대 PSNR을 반환 (division-by-zero 방지)
@@ -96,6 +104,16 @@ ErrorMeasurePass::ErrorMeasurePass(ref<Device> pDevice, const Properties& props)
     // Load/create files (if specified in config).
     loadReference();
     loadMeasurementsFile();
+
+
+    // 카메라 기록 고정 경로 자동 초기화
+    if (!kDefaultCameraRecordPath.empty())
+    {
+        mCameraRecordFilePath = kDefaultCameraRecordPath;
+        loadCameraRecordFile();
+        mRecordCamera = kAutoStartCameraRecord;
+    }
+    
 
     mpParallelReduction = std::make_unique<ParallelReduction>(mpDevice);
     mpErrorMeasurerPass = ComputePass::create(mpDevice, kErrorComputationShaderFile);
@@ -399,6 +417,7 @@ void ErrorMeasurePass::renderUI(Gui::Widgets& widget)
         widget.text("Error: N/A");
     }
 
+    /*
     // 카메라 궤적 기록 UI
     widget.separator();
     widget.text("Camera Recording");
@@ -426,6 +445,14 @@ void ErrorMeasurePass::renderUI(Gui::Widgets& widget)
         widget.text("(Set a file to enable recording)");
     else
         widget.checkbox("Record camera", mRecordCamera);
+        */
+
+
+    // 카메라 궤적 기록 UI
+    widget.separator();
+    widget.text("Camera Recording");
+    widget.text("File: " + mCameraRecordFilePath.string());
+    widget.checkbox("Record camera", mRecordCamera);
 }
 
 bool ErrorMeasurePass::onKeyEvent(const KeyboardEvent& keyEvent)
