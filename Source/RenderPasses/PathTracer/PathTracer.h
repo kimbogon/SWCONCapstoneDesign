@@ -123,7 +123,7 @@ private:
     struct StaticParams
     {
         // Rendering parameters
-        uint32_t    samplesPerPixel = 1;                        ///< Number of samples (paths) per pixel, unless a sample density map is used.
+        uint32_t    samplesPerPixel = 4;                        ///< Number of samples (paths) per pixel, unless a sample density map is used.
         uint32_t    maxSurfaceBounces = 0;                      ///< Max number of surface bounces (diffuse + specular + transmission), up to kMaxPathLenth. This will be initialized at startup.
         uint32_t    maxDiffuseBounces = 3;                      ///< Max number of diffuse bounces (0 = direct only), up to kMaxBounces.
         uint32_t    maxSpecularBounces = 3;                     ///< Max number of specular bounces (0 = direct only), up to kMaxBounces.
@@ -213,3 +213,32 @@ private:
     ref<Buffer>                     mpSampleNRDEmission;        ///< Compact per-sample NRD emission data.
     ref<Buffer>                     mpSampleNRDReflectance;     ///< Compact per-sample NRD reflectance data.
 };
+
+// ============================================================
+// Adaptive Sampling — version control
+// ADAPTIVE_VERSION 값 하나만 바꾸면 전체 기능 조합이 제어된다.
+//
+//   0 : baseline — 기존 PathTracer와 완전히 동일
+//   1 : Ideas A + B — GeneratePaths 단계에서 저중요도 픽셀 early-exit
+//   2 : Ideas D + E — TracePass 단계에서 bounce 제한 + specular 스킵
+//   3 : All (A + B + D + E)
+//
+// 이 값을 변경하면 셰이더가 재컴파일된다.
+// ============================================================
+#define ADAPTIVE_VERSION 3
+
+#if   ADAPTIVE_VERSION == 0
+    #define USE_IDEA_AB 0
+    #define USE_IDEA_DE 0
+#elif ADAPTIVE_VERSION == 1
+    #define USE_IDEA_AB 1
+    #define USE_IDEA_DE 0
+#elif ADAPTIVE_VERSION == 2
+    #define USE_IDEA_AB 0
+    #define USE_IDEA_DE 1
+#elif ADAPTIVE_VERSION == 3
+    #define USE_IDEA_AB 1
+    #define USE_IDEA_DE 1
+#else
+    #error "Unknown ADAPTIVE_VERSION value. Valid range: 0-3."
+#endif

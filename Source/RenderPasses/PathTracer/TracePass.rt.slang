@@ -51,6 +51,31 @@ static const uint kMissScatter = 0;
 
 struct DummyAttribs { uint dummy; };
 
+// ============================================================
+// [아이디어 D/E] Adaptive TracePass 파라미터
+// USE_IDEA_DE == 1일 때만 컴파일된다.
+// ============================================================
+#if USE_IDEA_DE
+
+/// SampleCountPass sampleCount (R8Uint) 이 값 이하이면 "저중요도"로 판정한다.
+/// kSamplesPerPixel == 0 (가변 spp) 모드에서만 사용된다.
+static const uint kAdaptiveLowSppThreshold = 1u;
+
+/// [아이디어 D] 저중요도 픽셀에 허용할 최대 bounce 수.
+/// path.getVertexIndex()가 이 값보다 크면 while 루프를 조기 종료한다.
+///   0 = 직접광(Primary NEE)만
+///   1 = 직접광 + 1-bounce 간접광 (기본값)
+static const uint kAdaptiveLowMaxBounces = 1u;
+
+/// [아이디어 E] PathState.bounceCounters에서 specular bounce 카운터를 추출하는 비트 시프트.
+/// Falcor 8.0 기본: BounceType { Diffuse=0, Specular=1, Transmission=2 }
+///   → 8비트씩 패킹, specular 는 bits[8:15] → shift = 8.
+/// PathState.slang의 실제 패킹이 다르면 이 값만 수정한다.
+static const uint kAdaptiveSpecShift = 8u;
+static const uint kAdaptiveSpecMask  = 0xffu;
+
+#endif // USE_IDEA_DE
+
 struct PathPayload
 {
     uint4 packed[5];
@@ -248,6 +273,15 @@ struct ReorderingScheduler
         gPathTracer.generatePath(pathID, path);
         gPathTracer.setupPathLogging(path);
 
+#if USE_IDEA_DE
+        // [아이디어 D/E] pathID 인코딩: pixel.x = bits[0:11], pixel.y = bits[12:23]
+        // run()에서 pathID = pixel.x | (pixel.y << 12) | (samplesRemaining << 24)
+        const uint2 dePixel = uint2(path.id & 0xfffu, (path.id >> 12u) & 0xfffu);
+        const uint  deSpp   = (kSamplesPerPixel == 0) ? gPathTracer.sampleCount[dePixel]
+                                                      : kSamplesPerPixel;
+        const bool  deLow   = (deSpp <= kAdaptiveLowSppThreshold);
+#endif
+
         if (path.isHit())
         {
             // Handle primary hits.
@@ -299,11 +333,34 @@ struct ReorderingScheduler
             return;
         }
 
+#if USE_IDEA_DE
+        // [아이디어 E] Primary hit 의 scatter lobe 가 specular 이면
+        // 저중요도 픽셀에서는 간접광 추적 자체를 수행하지 않는다.
+        // primary handleHit() 이후 bounceCounters specular 비트가 0 이상이면
+        // 다음 scatter 가 specular임을 의미한다.
+        if (deLow && ((path.bounceCounters >> kAdaptiveSpecShift) & kAdaptiveSpecMask) > 0u)
+        {
+            path.terminate();
+        }
+#endif
+
         // Trace path.
         while (path.isActive())
         {
             PathPayload payload = {};
             HitObject hitObject;
+
+#if USE_IDEA_DE
+            // [아이디어 D] 저중요도 픽셀의 최대 bounce 수 제한.
+            // incrementVertexIndex() 호출 전에 체크하여 레이 발사 자체를 막는다.
+            if (deLow && path.getVertexIndex() > kAdaptiveLowMaxBounces)
+            {
+                path.terminate();
+                break;
+            }
+            // [아이디어 E] 이번 Invoke 완료 후 specular bounce 증가 여부를 판단할 기준값.
+            const uint deSpecBefore = (path.bounceCounters >> kAdaptiveSpecShift) & kAdaptiveSpecMask;
+#endif
 
             {
                 // Advance to next path vertex.
@@ -339,6 +396,20 @@ struct ReorderingScheduler
             payload = PathPayload::pack(path);
             HitObject::Invoke(gScene.rtAccel, hitObject, payload);
             path = PathPayload::unpack(payload);
+
+#if USE_IDEA_DE
+            // [아이디어 E] 이번 bounce 가 specular 였으면 저중요도 픽셀에서 조기 종료.
+            // Invoke 완료 후 bounceCounters 가 갱신된 시점에 체크한다.
+            if (deLow)
+            {
+                const uint deSpecAfter = (path.bounceCounters >> kAdaptiveSpecShift) & kAdaptiveSpecMask;
+                if (deSpecAfter > deSpecBefore)
+                {
+                    path.terminate();
+                    break;
+                }
+            }
+#endif
         }
 
 #if !defined(DELTA_REFLECTION_PASS) && !defined(DELTA_TRANSMISSION_PASS)
@@ -454,6 +525,14 @@ struct Scheduler
         gPathTracer.generatePath(pathID, path);
         gPathTracer.setupPathLogging(path);
 
+#if USE_IDEA_DE
+        // [아이디어 D/E] pathID 인코딩: pixel.x = bits[0:11], pixel.y = bits[12:23]
+        const uint2 dePixel = uint2(path.id & 0xfffu, (path.id >> 12u) & 0xfffu);
+        const uint  deSpp   = (kSamplesPerPixel == 0) ? gPathTracer.sampleCount[dePixel]
+                                                      : kSamplesPerPixel;
+        const bool  deLow   = (deSpp <= kAdaptiveLowSppThreshold);
+#endif
+
         // Handle primary hit/miss.
         if (path.isHit())
         {
@@ -473,10 +552,44 @@ struct Scheduler
             return;
         }
 
+#if USE_IDEA_DE
+        // [아이디어 E] Primary hit 의 scatter lobe 가 specular 이면
+        // 저중요도 픽셀에서는 간접광 추적 자체를 수행하지 않는다.
+        if (deLow && ((path.bounceCounters >> kAdaptiveSpecShift) & kAdaptiveSpecMask) > 0u)
+        {
+            path.terminate();
+        }
+#endif
+
         // Trace path.
         while (path.isActive())
         {
+#if USE_IDEA_DE
+            // [아이디어 D] 저중요도 픽셀의 최대 bounce 수 제한.
+            // incrementVertexIndex() 를 포함하는 nextHit() 호출 전에 체크하여
+            // 레이 발사 자체를 막는다.
+            if (deLow && path.getVertexIndex() > kAdaptiveLowMaxBounces)
+            {
+                path.terminate();
+                break;
+            }
+            // [아이디어 E] nextHit() 완료 후 specular bounce 증가 여부를 판단할 기준값.
+            const uint deSpecBefore = (path.bounceCounters >> kAdaptiveSpecShift) & kAdaptiveSpecMask;
+#endif
             nextHit(path);
+#if USE_IDEA_DE
+            // [아이디어 E] 이번 bounce 가 specular 였으면 저중요도 픽셀에서 조기 종료.
+            // nextHit() 내부의 handleHit() 이 완료된 시점에 bounceCounters 를 확인한다.
+            if (deLow)
+            {
+                const uint deSpecAfter = (path.bounceCounters >> kAdaptiveSpecShift) & kAdaptiveSpecMask;
+                if (deSpecAfter > deSpecBefore)
+                {
+                    path.terminate();
+                    break;
+                }
+            }
+#endif
         }
 
 #if !defined(DELTA_REFLECTION_PASS) && !defined(DELTA_TRANSMISSION_PASS)

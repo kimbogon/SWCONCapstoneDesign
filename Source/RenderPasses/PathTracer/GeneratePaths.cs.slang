@@ -44,6 +44,13 @@ static const uint kWarpCount = (kScreenTileDim.x * kScreenTileDim.y) / 32;
 // TODO: Replace explicitly declared size by compile-time constant when it works. For now assume tile is always 16x16!
 groupshared uint gSamplesOffset[8 /* kWarpCount */];
 
+#if USE_IDEA_AB
+// [아이디어 B] 타일 내 모든 픽셀의 spp 합이 0인지 나타내는 플래그.
+// execute() 안에서 첫 번째 GroupMemoryBarrierWithGroupSync() 직후,
+// prefix sum 연산을 수행하기 전에 threadIdx == 0이 설정한다.
+groupshared bool gTileAllZeroSpp;
+#endif
+
 /** Helper struct for generating paths in screen space.
 
     The dispatch size is one thread group per screen tile. A warp is assumed to be 32 threads.
@@ -119,6 +126,20 @@ struct PathGenerator
             const HitInfo hit = unpackHitInfo(vbuffer[pixel]);
             hitSurface = hit.isValid();
 
+#if USE_IDEA_AB
+            // [아이디어 A] 낮은 중요도 픽셀의 조기 종료.
+            // SampleCountPass가 spp == 0을 배정한 표면 픽셀은 TracePass를 거칠 필요가 없다.
+            // hitSurface = false로 override하면:
+            //   (1) 아래 RTXDI 블록에서 setSurfaceData 비용이 스킵된다.
+            //   (2) prefix sum 이후 writeBackground()가 호출되어
+            //       outputColor / NRD / guide 버퍼에 0(또는 배경색)이 올바르게 기록된다.
+            // 이 분기는 kSamplesPerPixel == 0 (가변 spp 모드)에서만 의미가 있다.
+            if (hitSurface && spp == 0)
+            {
+                hitSurface = false;
+            }
+#endif
+
             // Prepare per-pixel surface data for RTXDI.
             if (kUseRTXDI)
             {
@@ -165,13 +186,37 @@ struct PathGenerator
         }
         GroupMemoryBarrierWithGroupSync();
 
+#if USE_IDEA_AB
+        // [아이디어 B] 타일 단위 중요도 조기 감지.
+        // 첫 번째 동기화 이후 시점에서 gSamplesOffset[i]에는
+        // 각 warp의 spp 합계(WaveActiveSum 결과)가 저장되어 있다.
+        // threadIdx == 0이 이를 모두 합산하여 타일 총합을 계산한다.
+        // 총합 == 0이면 타일 내 모든 픽셀이 low-importance(spp == 0)이므로
+        // 이후 prefix sum의 WavePrefixSum() 호출과 sampleOffset 쓰기를 생략할 수 있다.
+        if (threadIdx == 0)
+        {
+            uint tileSum = 0;
+            for (uint i = 0; i < kWarpCount; i++)
+                tileSum += gSamplesOffset[i];   // prefix sum 전 → 각 warp의 spp 합
+            gTileAllZeroSpp = (tileSum == 0);
+        }
+        GroupMemoryBarrierWithGroupSync();
+#endif
+
         // Compute the prefix sum over the warp totals in shared memory.
         // The first N threads in the thread group perform this computation.
         if (threadIdx < kWarpCount)
         {
-            // Compute the prefix sum over the sample counts.
-            uint samples = gSamplesOffset[threadIdx];
-            gSamplesOffset[threadIdx] = WavePrefixSum(samples);
+#if USE_IDEA_AB
+            // [아이디어 B] 타일 전체 spp가 0이면 prefix sum 연산 자체를 생략한다.
+            // gSamplesOffset[i] == 0이 이미 확정되어 있으므로 그대로 두면 된다.
+            if (!gTileAllZeroSpp)
+#endif
+            {
+                // Compute the prefix sum over the sample counts.
+                uint samples = gSamplesOffset[threadIdx];
+                gSamplesOffset[threadIdx] = WavePrefixSum(samples);
+            }
         }
         GroupMemoryBarrierWithGroupSync();
 
@@ -189,7 +234,22 @@ struct PathGenerator
             }
             else
             {
+#if USE_IDEA_AB
+                // [아이디어 B] 타일 전체 spp == 0이면 WavePrefixSum() 호출을 생략한다.
+                // gSamplesOffset[warpIdx] == 0, WavePrefixSum(0) == 0 이 자명하므로
+                // outSampleOffset = 0으로 직접 설정한다.
+                uint outSampleOffset;
+                if (gTileAllZeroSpp)
+                {
+                    outSampleOffset = 0;
+                }
+                else
+                {
+                    outSampleOffset = gSamplesOffset[warpIdx] + WavePrefixSum(spp);
+                }
+#else
                 uint outSampleOffset = gSamplesOffset[warpIdx] + WavePrefixSum(spp);
+#endif
                 outIdx = outTileOffset + outSampleOffset;
 
                 // Write sample offset lookup table. This will be used by later passes.
