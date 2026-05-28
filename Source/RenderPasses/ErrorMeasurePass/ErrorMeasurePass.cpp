@@ -59,7 +59,7 @@ const std::string kSelectedOutputId = "SelectedOutputId";
 const std::filesystem::path kDefaultCameraRecordPath = "C:/Users/bg001/Desktop/Falcor/Results/camera_record.csv"; 
 
 // 앱 시작 시 자동으로 기록 시작할지 여부
-const bool kAutoStartCameraRecord = true;
+const bool kAutoStartCameraRecord = false;
 
 
 // [요구사항 5-3] MSE=0 시 PSNR 상한 클램프 값 (inf 방지)

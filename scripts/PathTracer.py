@@ -28,7 +28,7 @@ except NameError: None
 # ============================================================
 # 캡처 설정
 # ============================================================
-ENABLE_AUTO_CAPTURE = True   # False로 바꾸면 자동 캡처 비활성화
+ENABLE_AUTO_CAPTURE = False   # False로 바꾸면 자동 캡처 비활성화
 CAPTURE_EVERY_N_FRAMES = 10   # 매 N프레임마다 캡처 (1 = 매 프레임)
 CAPTURE_TOTAL_FRAMES = 300   # 총 프레임 수
 FIXED_FRAMERATE = 60         # 카메라 애니메이션 고정 fps
