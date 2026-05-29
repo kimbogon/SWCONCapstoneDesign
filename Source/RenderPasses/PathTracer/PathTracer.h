@@ -225,7 +225,7 @@ private:
 //
 // 이 값을 변경하면 셰이더가 재컴파일된다.
 // ============================================================
-#define ADAPTIVE_VERSION 3
+#define ADAPTIVE_VERSION 0
 
 #if   ADAPTIVE_VERSION == 0
     #define USE_IDEA_AB 0
