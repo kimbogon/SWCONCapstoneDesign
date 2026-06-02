@@ -77,6 +77,7 @@ AdaptiveGraph = render_graph_AdaptivePathTracer()
 try: m.addGraph(AdaptiveGraph)
 except NameError: None
 
+'''
 # ============================================================
 # 캡처 설정
 # ============================================================
@@ -101,3 +102,4 @@ try:
 
 except NameError:
     None  # 렌더 그래프 에디터에서 단독 로드 시 m이 없을 때 무시
+    '''

@@ -184,9 +184,10 @@ namespace Falcor
                 break;
             }
 
-            mSpeedModifier = 1.0f;
+            // 카메라 속도 조절
+            mSpeedModifier = 2.0f;
             if (event.hasModifier(Input::Modifier::Ctrl)) mSpeedModifier = 0.25f;
-            else if (event.hasModifier(Input::Modifier::Shift)) mSpeedModifier = 10.0f;
+            else if (event.hasModifier(Input::Modifier::Shift)) mSpeedModifier = 6.0f;
         }
 
         return handled;
@@ -318,10 +319,14 @@ namespace Falcor
                 float3 viewDir = normalize(camTarget - camPos);
                 float3 sideway = cross(viewDir, normalize(camUp));
 
+                // ↓ 이 두 줄을 추가
+                float3 flatViewDir = normalize(float3(viewDir.x, 0.f, viewDir.z)); // Y성분 제거
+                float3 flatSideway = normalize(float3(sideway.x, 0.f, sideway.z)); // Y성분 제거
+
                 float curMove = mSpeedModifier * mSpeed * elapsedTime;
-                camPos += movement.z * curMove * viewDir;
-                camPos += movement.x * curMove * sideway;
-                camPos += movement.y * curMove * camUp;
+                camPos += movement.z * curMove * flatViewDir; // viewDir → flatViewDir
+                camPos += movement.x * curMove * flatSideway; // sideway → flatSideway
+                // camPos += movement.y * curMove * camUp;
 
                 if (mBounds.valid())
                     camPos = clamp(camPos, mBounds.minPoint, mBounds.maxPoint);

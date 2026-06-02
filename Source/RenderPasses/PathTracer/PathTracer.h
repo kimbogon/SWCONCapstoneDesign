@@ -222,23 +222,35 @@ private:
 //   1 : Ideas A + B — GeneratePaths 단계에서 저중요도 픽셀 early-exit
 //   2 : Ideas D + E — TracePass 단계에서 bounce 제한 + specular 스킵
 //   3 : All (A + B + D + E)
-//
-// 이 값을 변경하면 셰이더가 재컴파일된다.
+//   4 : Idea C — 고중요도 픽셀 Stratified Sampling  ← 신규
+//   5 : All (A + B + C + D + E)                     ← 신규
 // ============================================================
-#define ADAPTIVE_VERSION 0
+#define ADAPTIVE_VERSION 4
 
-#if   ADAPTIVE_VERSION == 0
-    #define USE_IDEA_AB 0
-    #define USE_IDEA_DE 0
+#if ADAPTIVE_VERSION == 0
+#define USE_IDEA_AB 0
+#define USE_IDEA_C 0
+#define USE_IDEA_DE 0
 #elif ADAPTIVE_VERSION == 1
-    #define USE_IDEA_AB 1
-    #define USE_IDEA_DE 0
+#define USE_IDEA_AB 1
+#define USE_IDEA_C 0
+#define USE_IDEA_DE 0
 #elif ADAPTIVE_VERSION == 2
-    #define USE_IDEA_AB 0
-    #define USE_IDEA_DE 1
+#define USE_IDEA_AB 0
+#define USE_IDEA_C 0
+#define USE_IDEA_DE 1
 #elif ADAPTIVE_VERSION == 3
-    #define USE_IDEA_AB 1
-    #define USE_IDEA_DE 1
+#define USE_IDEA_AB 1
+#define USE_IDEA_C 0
+#define USE_IDEA_DE 1
+#elif ADAPTIVE_VERSION == 4
+#define USE_IDEA_AB 0
+#define USE_IDEA_C 1 // Idea C 단독
+#define USE_IDEA_DE 0
+#elif ADAPTIVE_VERSION == 5
+#define USE_IDEA_AB 1
+#define USE_IDEA_C 1 // 전체 조합
+#define USE_IDEA_DE 1
 #else
-    #error "Unknown ADAPTIVE_VERSION value. Valid range: 0-3."
+#error "Unknown ADAPTIVE_VERSION value. Valid range: 0-5."
 #endif

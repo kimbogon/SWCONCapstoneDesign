@@ -47,6 +47,14 @@ __exported import PathState;
 __exported import Params;
 import Rendering.RTXDI.RTXDI;
 
+#if USE_IDEA_C
+
+/// 이 임계값 이상의 spp 를 가진 픽셀에 stratified sampling 을 적용한다.
+/// 기본값 4: spp == 1 인 저중요도 픽셀은 기존 방식을 유지한다.
+static const uint kStratifiedSppThreshold = 4u;
+
+#endif // USE_IDEA_C
+
 /** Interface for querying visibility in the scene.
     This is used in `handleHit`.
 */
@@ -267,6 +275,11 @@ struct PathTracer
 
     /** Generate the path state for a primary hit in screen space.
         This is treated equivalent to subsequent path vertices to reduce code divergence.
+
+        [아이디어 C] USE_IDEA_C == 1 일 때:
+          - spp >= kStratifiedSppThreshold 인 픽셀에 격자 기반 stratified 적용.
+          - 나머지는 기존 픽셀 중심 레이 유지.
+
         \param[in] pathID Path ID which encodes pixel and sample index.
         \param[out] path Path state for the primary hit.
     */
@@ -279,8 +292,68 @@ struct PathTracer
 
         const uint2 pixel = path.getPixel();
 
-        // Create primary ray.
+        // 기존 방식으로 primary ray 생성 (origin 및 기본 dir 확보).
         Ray cameraRay = gScene.camera.computeRayPinhole(pixel, params.frameDim);
+
+#if USE_IDEA_C
+        // -------------------------------------------------------
+        // [아이디어 C] 고중요도 픽셀에 Stratified Sampling 적용.
+        //
+        // 적용 조건:
+        //   (1) 가변 spp 모드 (kSamplesPerPixel == 0)
+        //   (2) DOF 미사용 (kUseViewDir == false)
+        //          → kUseViewDir 시 dir 는 어차피 viewDir[] 로 덮어쓰인다.
+        //   (3) 이 픽셀의 spp >= kStratifiedSppThreshold
+        // -------------------------------------------------------
+        if (kSamplesPerPixel == 0 && !kUseViewDir)
+        {
+            const uint pixelSpp = sampleCount[pixel];
+
+            if (pixelSpp >= kStratifiedSppThreshold)
+            {
+                const uint sampleIdx = path.getSampleIdx();
+
+                // 격자 크기: floor(sqrt(spp)).
+                //   spp=2 → gridN=1 (1×1 = 중심 1개, 나머지는 중심으로)
+                //   spp=4 → gridN=2 (2×2 격자)
+                //   spp=6 → gridN=2 (2×2 격자, 2개는 중심)
+                //   spp=9 → gridN=3 (3×3 격자)
+                const uint gridN = (uint)sqrt((float)pixelSpp);
+                const uint gridTotal = gridN * gridN;
+
+                float2 jitter;
+
+                if (sampleIdx < gridTotal)
+                {
+                    // 격자 셀 번호 → (cellX, cellY)
+                    // Morton 순서가 아닌 scanline 순서로 배치.
+                    const uint cellX = sampleIdx % gridN;
+                    const uint cellY = sampleIdx / gridN;
+
+                    // 각 셀의 중심 jitter.
+                    // 셀 크기 = 1/gridN 픽셀, 셀 중심 = (cell + 0.5) / gridN.
+                    // 전체 범위: [0.5/gridN, 1 - 0.5/gridN] (픽셀 내부 균등 배치).
+                    jitter = float2(
+                        (float(cellX) + 0.5f) / float(gridN),
+                        (float(cellY) + 0.5f) / float(gridN)
+                    );
+                }
+                else
+                {
+                    // 격자를 초과하는 나머지 sample → 픽셀 중심.
+                    jitter = float2(0.5f, 0.5f);
+                }
+
+                // 서브픽셀 절대 좌표 (픽셀 단위).
+                const float2 subPixelPos = float2(pixel) + jitter;
+
+                // 레이 방향 재계산. origin 은 기존 값 재사용.
+                cameraRay.dir = computeRayDirFromSubPixel(subPixelPos, params.frameDim);
+            }
+            // else (spp < threshold): 기존 픽셀 중심 레이 유지.
+        }
+#endif // USE_IDEA_C
+
         if (kUseViewDir) cameraRay.dir = -viewDir[pixel];
         path.origin = cameraRay.origin;
         path.dir = cameraRay.dir;
@@ -299,6 +372,29 @@ struct PathTracer
             path.setVertexIndex(1);
         }
     }
+
+#if USE_IDEA_C
+    // ============================================================
+    // [아이디어 C] 헬퍼: 서브픽셀 좌표로부터 카메라 레이 방향을 계산한다.
+    //
+    // \param[in] subPixelPos 픽셀 내 서브픽셀 위치 (소수점 포함).
+    //                        예: pixel=(3,2), jitter=(0.25,0.75) →
+    //                            subPixelPos = (3.25, 2.75)
+    // \param[in] frameDim    프레임 해상도 (pixels)
+    // \return 정규화된 레이 방향 벡터
+    // ============================================================
+    float3 computeRayDirFromSubPixel(const float2 subPixelPos, const uint2 frameDim)
+    {
+        // Falcor Camera 의 computeRayPinhole 내부 공식 재현.
+        // (0,0) = 화면 좌상단, x 오른쪽, y 아래쪽.
+        float2 p = subPixelPos / float2(frameDim);                 // [0,1]
+        float2 ndc = float2(2.f, -2.f) * p + float2(-1.f, 1.f);    // NDC
+        float3 dir = ndc.x * gScene.camera.data.cameraU
+                   + ndc.y * gScene.camera.data.cameraV
+                   + gScene.camera.data.cameraW; // 비정규화
+        return normalize(dir);
+    }
+#endif // USE_IDEA_C
 
     /** Set up path for logging and debugging.
         \param[in] path Path state.

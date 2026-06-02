@@ -124,11 +124,12 @@ camera.up          = float3(0, 1, 0)
 camera.focalLength = 21
 sceneBuilder.addCamera(camera)
 
-# _cam_anim = sceneBuilder.createAnimation(camera, 'recorded', 86400.0000)
+#_cam_anim = sceneBuilder.createAnimation(camera, 'recorded', 86400.0000)
 
 # 여기에 keyframe 삽입
 
-# _cam_anim.postInfinityBehavior = Animation.Behavior.Constant
+
+#_cam_anim.postInfinityBehavior = Animation.Behavior.Constant
 
 # ------------------------------------------------------------
 # 6. 조명
