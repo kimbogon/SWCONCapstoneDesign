@@ -145,7 +145,10 @@ RenderPassReflection SVGFPass::reflect(const CompileData& compileData)
     reflector.addInput(kInputBufferEmission, "Emission");
     reflector.addInput(kInputBufferWorldPosition, "World Position");
     reflector.addInput(kInputBufferWorldNormal, "World Normal");
-    reflector.addInput(kInputBufferPosNormalFwidth, "PositionNormalFwidth");
+    // [pnFwidth fallback] GBufferRT는 RT 셰이더에서 ddx/ddy를 사용할 수 없어
+    // PositionNormalFwidth 채널을 출력하지 않는다. optional로 변경하고
+    // 연결되지 않으면 execute()에서 전체 0 더미 텍스처로 대체한다.
+    reflector.addInput(kInputBufferPosNormalFwidth, "PositionNormalFwidth").flags(RenderPassReflection::Field::Flags::Optional);
     reflector.addInput(kInputBufferLinearZ, "LinearZ");
     reflector.addInput(kInputBufferMotionVector, "Motion vectors");
 
@@ -177,9 +180,17 @@ void SVGFPass::execute(RenderContext* pRenderContext, const RenderData& renderDa
     ref<Texture> pEmissionTexture = renderData.getTexture(kInputBufferEmission);
     ref<Texture> pWorldPositionTexture = renderData.getTexture(kInputBufferWorldPosition);
     ref<Texture> pWorldNormalTexture = renderData.getTexture(kInputBufferWorldNormal);
-    ref<Texture> pPosNormalFwidthTexture = renderData.getTexture(kInputBufferPosNormalFwidth);
     ref<Texture> pLinearZTexture = renderData.getTexture(kInputBufferLinearZ);
     ref<Texture> pMotionVectorTexture = renderData.getTexture(kInputBufferMotionVector);
+
+    // [pnFwidth fallback] PositionNormalFwidth가 연결되지 않은 경우(GBufferRT 사용 시)
+    // 전체 0 더미 텍스처를 사용한다. fwidth 기반 엣지 스탑핑이 꺼지는 것과 동일한 효과.
+    ref<Texture> pPosNormalFwidthTexture = renderData.getTexture(kInputBufferPosNormalFwidth);
+    if (!pPosNormalFwidthTexture)
+    {
+        FALCOR_ASSERT(mpFallbackPosNormalFwidth);
+        pPosNormalFwidthTexture = mpFallbackPosNormalFwidth;
+    }
 
     ref<Texture> pOutputTexture = renderData.getTexture(kOutputBufferFilteredImage);
 
@@ -277,6 +288,17 @@ void SVGFPass::allocateFbos(uint2 dim, RenderContext* pRenderContext)
         mpFilteredIlluminationFbo = Fbo::create2D(mpDevice, dim.x, dim.y, desc);
         mpFinalFbo = Fbo::create2D(mpDevice, dim.x, dim.y, desc);
     }
+
+    // [pnFwidth fallback] PositionNormalFwidth 입력이 없을 때 사용할 1x1 RGBA32F 더미 텍스처.
+    // 모든 채널 0 → fwidth 기반 엣지 스탑핑 비활성화와 동일한 효과.
+    float4 zero = float4(0.f);
+    mpFallbackPosNormalFwidth = mpDevice->createTexture2D(
+        1, 1,
+        ResourceFormat::RGBA32Float,
+        1, 1,
+        &zero,
+        ResourceBindFlags::ShaderResource
+    );
 
     mBuffersNeedClear = true;
 }

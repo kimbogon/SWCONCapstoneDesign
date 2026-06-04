@@ -21,7 +21,7 @@ matWall.roughness = 0.9
 matEnemy = StandardMaterial('Enemy')
 matEnemy.baseColor = float4(0.9, 0.2, 0.2, 1.0)   # 빨간 구
 matEnemy.roughness = 0.3
-matEnemy.metallic  = 0.6
+# matEnemy.metallic  = 0.6
 
 matGreen = StandardMaterial('GreenCube')
 matGreen.baseColor = float4(0.1, 0.8, 0.2, 1.0)
@@ -127,7 +127,6 @@ sceneBuilder.addCamera(camera)
 #_cam_anim = sceneBuilder.createAnimation(camera, 'recorded', 86400.0000)
 
 # 여기에 keyframe 삽입
-
 
 #_cam_anim.postInfinityBehavior = Animation.Behavior.Constant
 

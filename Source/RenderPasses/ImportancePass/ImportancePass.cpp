@@ -140,15 +140,11 @@ void ImportancePass::updateTaskState(float dt)
     if (wasdDown) mSteerHold += dt; else mSteerHold = 0.f;
 
     const bool stillCam    = !camMoved;
-    const bool stillMouse  = !mMouseMovedThisFrame;
     const bool enemyCenter = (mCenterCategory == 1u);
     const bool itemCenter  = (mCenterCategory == 2u);
 
-    // if (enemyCenter) mEnemyHold += dt; else mEnemyHold = 0.f;
-    // if (itemCenter)  mItemHold  += dt; else mItemHold  = 0.f;
-
-    if (enemyCenter)                          mAimHold   += dt; else mAimHold   = 0.f;
-    if (stillCam && stillMouse && itemCenter) mPointHold += dt; else mPointHold = 0.f;
+    if (enemyCenter)            mAimHold   += dt; else mAimHold   = 0.f;
+    if (stillCam && itemCenter) mPointHold += dt; else mPointHold = 0.f;
 
     // 3) Priority: Aiming > Pointing > Steering
     TaskType t = TaskType::None;

@@ -17,8 +17,19 @@ def render_graph_AdaptivePathTracer():
     PathTracer = createPass("PathTracer", {'samplesPerPixel': 1})
     g.addPass(PathTracer, "PathTracer")
 
-    AccumulatePass = createPass("AccumulatePass")
-    g.addPass(AccumulatePass, "AccumulatePass")
+    # AccumulatePass 삭제: 오브젝트 애니메이션으로 매 프레임 누적이 초기화되어 효과 없음
+    # 대신 SVGFPass로 시간적 디노이징 수행 (motion vector 기반 재투영)
+    SVGFPass = createPass("SVGFPass", {
+        'Enabled': True,
+        'Iterations': 4,
+        'FeedbackTap': 1,
+        'VarianceEpsilon': 1e-4,
+        'PhiColor': 10.0,
+        'PhiNormal': 128.0,
+        'Alpha': 0.05,
+        'MomentsAlpha': 0.5,
+    })
+    g.addPass(SVGFPass, "SVGFPass")
 
     # [요구사항 1] ErrorMeasurePass 추가: PSNR 기반 정량 평가를 위해 그래프에 통합
     # ComputeSquaredDifference=True 로 MSE 모드 활성화, IgnoreBackground=True 로 배경 제외
@@ -30,8 +41,11 @@ def render_graph_AdaptivePathTracer():
     })
     g.addPass(ErrorMeasurePass, "ErrorMeasurePass")
 
-    ToneMapper = createPass("ToneMapper")
-    g.addPass(ToneMapper, "ToneMapper")
+    # ToneMapper 삭제: 최종 출력을 float32 HDR(.exr)로 보존하기 위해 제거
+
+    # OverlayPass: 화면 중앙 크로스헤어 오버레이 (ImGui DrawList 방식)
+    OverlayPass = createPass("OverlayPass")
+    g.addPass(OverlayPass, "OverlayPass")
 
     # --- Edges ------------------------------------------------------------
     # 1. Primary Visibility
@@ -50,22 +64,27 @@ def render_graph_AdaptivePathTracer():
     g.addEdge("GBufferRT.viewW", "PathTracer.viewW")
     g.addEdge("GBufferRT.mvecW", "PathTracer.mvec")
 
-    # 4. Accumulation
-    g.addEdge("PathTracer.color",      "AccumulatePass.input")
+    # 4. SVGF 연결: PathTracer 출력 + GBuffer 보조 데이터
+    g.addEdge("PathTracer.color",      "SVGFPass.Color")
+    g.addEdge("PathTracer.albedo",     "SVGFPass.Albedo")
+    g.addEdge("GBufferRT.emissive",    "SVGFPass.Emission")             
+    g.addEdge("GBufferRT.mvecW",       "SVGFPass.MotionVec")
+    g.addEdge("GBufferRT.guideNormalW","SVGFPass.WorldNormal")
+    g.addEdge("GBufferRT.posW",        "SVGFPass.WorldPosition")       
+    g.addEdge("GBufferRT.linearZ",     "SVGFPass.LinearZ")              
 
     # 5. ErrorMeasurePass 연결
-    # AccumulatePass.output -> ErrorMeasurePass.Source  (평가 대상 이미지)
-    # GBufferRT.linearZ    -> ErrorMeasurePass.WorldPosition  (배경 제거용)
-    # ErrorMeasurePass.Output -> ToneMapper.src  (파이프라인 유지)
-    g.addEdge("AccumulatePass.output",  "ErrorMeasurePass.Source")
-    g.addEdge("GBufferRT.linearZ",      "ErrorMeasurePass.WorldPosition")
-    g.addEdge("ErrorMeasurePass.Output", "ToneMapper.src")
+    # SVGFPass.Filtered image -> ErrorMeasurePass.Source  (평가 대상 이미지)
+    # GBufferRT.linearZ       -> ErrorMeasurePass.WorldPosition  (배경 제거용)
+    g.addEdge("SVGFPass.Filtered image", "ErrorMeasurePass.Source")
+    g.addEdge("GBufferRT.linearZ",       "ErrorMeasurePass.WorldPosition")
+
+    # 6. OverlayPass 연결: ErrorMeasurePass 출력을 받아 크로스헤어 오버레이 후 최종 출력
+    g.addEdge("ErrorMeasurePass.Output",  "OverlayPass.input")
 
     # --- Output -----------------------------------------------------------
-    # 기존 렌더링 결과 출력 유지 (ErrorMeasurePass 는 평가용으로만 사용)
-    g.markOutput("ToneMapper.dst")
-    # 레퍼런스 이미지 캡처용
-    g.markOutput("AccumulatePass.output")
+    # 최종 출력: OverlayPass.output (크로스헤어 오버레이 적용)
+    g.markOutput("OverlayPass.output")
     # Importance Map 시각화 출력 등록
     g.markOutput("ImportancePass.importanceVis")
     # Sample Count Map 시각화 출력 등록
@@ -102,4 +121,4 @@ try:
 
 except NameError:
     None  # 렌더 그래프 에디터에서 단독 로드 시 m이 없을 때 무시
-    '''
+'''

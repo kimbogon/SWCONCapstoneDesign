@@ -144,10 +144,13 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     // 실제 sample count 기록 (R8Uint — PathTracer 가 읽음).
     gOutput[pixel] = count;
 
-    // [디버그 시각화] sample count 를 [0, 1] 로 정규화하여 밝기로 표현한다.
-    //   count / maxSamples:  1spp → 어두움, maxSamples spp → 흰색
+    // [디버그 시각화] sample count 를 히트맵으로 표현한다.
+    //   count / maxSamples:  낮음 → 파랑, 높음 → 빨강
 #if HAS_SAMPLE_COUNT_VIS
-    float normalizedCount = float(count) / float(maxSamples);
-    gSampleCountVis[pixel] = float4(normalizedCount, normalizedCount, normalizedCount, 1.f);
+    float t = saturate(float(count) / float(maxSamples));
+    float3 heatCol = (t < 0.5f)
+        ? lerp(float3(0.f, 0.f, 1.f), float3(0.f, 1.f, 0.f), t * 2.f)        // 파랑 → 초록
+        : lerp(float3(0.f, 1.f, 0.f), float3(1.f, 0.f, 0.f), t * 2.f - 1.f); // 초록 → 빨강
+    gSampleCountVis[pixel] = float4(heatCol, 1.f);
 #endif
 }

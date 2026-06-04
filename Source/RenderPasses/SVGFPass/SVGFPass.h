@@ -91,4 +91,8 @@ private:
     ref<Fbo> mpPrevReprojFbo;
     ref<Fbo> mpFilteredIlluminationFbo;
     ref<Fbo> mpFinalFbo;
+
+    // [pnFwidth fallback] PositionNormalFwidth 입력이 연결되지 않았을 때 사용하는
+    // 전체 0 더미 텍스처. fwidth 기반 엣지 스탑핑이 비활성화된 것과 동일한 효과.
+    ref<Texture> mpFallbackPosNormalFwidth;
 };

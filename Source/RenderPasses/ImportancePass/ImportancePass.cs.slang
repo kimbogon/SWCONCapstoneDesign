@@ -159,8 +159,14 @@ float sampleCDist(int2 p)
 #if HAS_CENTER_DIST
     return gCenterDist[clampP(p)];
 #else
+    // float2 uv = (float2(p) + 0.5f) * invFrameDim;
+    // return length(uv - float2(0.5f, 0.5f));
+
     float2 uv = (float2(p) + 0.5f) * invFrameDim;
-    return length(uv - float2(0.5f, 0.5f));
+    float2 diff = uv - float2(0.5f, 0.5f);
+    float aspect = float(frameDim.x) / float(frameDim.y); // 예: 1920/1080 ≈ 1.778
+    diff.x *= aspect;                                     // X축 거리를 픽셀 비율로 보정
+    return length(diff);
 #endif
 }
 
@@ -225,6 +231,15 @@ bool isItemColor(float3 c)
     return greenDom || blueDom;
 }
 
+// [히트맵] 스칼라 값 t ∈ [0,1] 을 파랑→초록→빨강 으로 매핑한다.
+float3 heatmap(float t)
+{
+    t = saturate(t);
+    return (t < 0.5f)
+        ? lerp(float3(0.f, 0.f, 1.f), float3(0.f, 1.f, 0.f), t * 2.f)        // 파랑 → 초록
+        : lerp(float3(0.f, 1.f, 0.f), float3(1.f, 0.f, 0.f), t * 2.f - 1.f); // 초록 → 빨강
+}
+
 [numthreads(16, 16, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -263,15 +278,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     // =========================================================
     float taskImp = 0.f;
 
-    if (activeTask == 1u) // Aiming: center region
+    if (activeTask == 1u) // Aiming: 붉은색(적) 픽셀에 높은 중요도
     {
-        float dist = length(uv - centerUV);
-        if (dist < centerRadiusUV) taskImp = taskImportance;
+        float3 albedo = sampleAlbedo(p);
+        if (isEnemyColor(albedo)) taskImp = taskImportance;
     }
-    else if (activeTask == 2u) // Pointing: center region (item)
+    else if (activeTask == 2u) // Pointing: 녹색(아이템) 픽셀에 높은 중요도
     {
-        float dist = length(uv - centerUV);
-        if (dist < centerRadiusUV) taskImp = taskImportance;
+        float3 albedo = sampleAlbedo(p);
+        if (isItemColor(albedo)) taskImp = taskImportance;
     }
     else if (activeTask == 3u) // Steering: lower screen region
     {
@@ -322,14 +337,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 #if HAS_IMPORTANCE_VIS
     if (hasImportanceVis != 0u)
     {
-        float3 col = float3(outScalar, outScalar, outScalar);
-        if (debugView == 1u) // task overlay
+        // [히트맵] 중요도 값을 파랑(낮음) → 초록(중간) → 빨강(높음) 으로 시각화
+        float3 col = heatmap(outScalar);
+
+        if (debugView == 1u) // task overlay: 히트맵 위에 태스크 tint 를 혼합
         {
             float3 tint = float3(1.f, 1.f, 1.f);
             if      (activeTask == 1u) tint = float3(1.0f, 0.2f, 0.2f); // Aim: red
             else if (activeTask == 2u) tint = float3(0.2f, 1.0f, 0.4f); // Point: green
             else if (activeTask == 3u) tint = float3(0.3f, 0.6f, 1.0f); // Steer: blue
-            col = lerp(float3(outScalar, outScalar, outScalar), tint, taskImp * 0.7f);
+            col = lerp(col, tint, taskImp * 0.7f);
         }
         gImportanceVis[pixel] = float4(col, 1.f);
     }

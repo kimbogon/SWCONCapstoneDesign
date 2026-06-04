@@ -49,13 +49,16 @@ void main(uint3 DTid: SV_DispatchThreadID)
     const float4 worldPos = gWorldPosition[pixel];
     const bool isForeground = worldPos.w != 0.0f; // We're using the w-component to identify valid pixels.
 
-    const bool isPixelValid = !gIgnoreBackground || isForeground;
+    // const bool isPixelValid = !gIgnoreBackground || isForeground;
+    const bool isPixelValid = (gIgnoreBackground == 0u) || isForeground;
 
     // Compute error based on the current options.
     float3 diff = isPixelValid ? abs(gSource[pixel].rgb - gReference[pixel].rgb) : float3(0.0f);
-    if (gComputeDiffSqr)
+    // if (gComputeDiffSqr)
+    if (gComputeDiffSqr != 0u)
         diff *= diff;
-    if (gComputeAverage)
+    // if (gComputeAverage)
+    if (gComputeAverage != 0u)
         diff.rgb = (diff.r + diff.g + diff.b) / 3.f;
 
     gResult[pixel] = float4(diff, 0.0f);
