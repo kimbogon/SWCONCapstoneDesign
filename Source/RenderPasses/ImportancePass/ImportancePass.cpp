@@ -136,15 +136,16 @@ void ImportancePass::updateTaskState(float dt)
     mCameraMoved = camMoved;
 
     // 2) Accumulate hold timers
-    const bool wasdDown    = mKeyW || mKeyA || mKeyS || mKeyD;
-    if (wasdDown) mSteerHold += dt; else mSteerHold = 0.f;
+    // const bool wasdDown    = mKeyW || mKeyA || mKeyS || mKeyD;
+    // if (wasdDown) mSteerHold += dt; else mSteerHold = 0.f;
+    if (camMoved) mSteerHold += dt; else mSteerHold = 0.f;
 
-    const bool stillCam    = !camMoved;
+    // const bool stillCam    = !camMoved;
     const bool enemyCenter = (mCenterCategory == 1u);
     const bool itemCenter  = (mCenterCategory == 2u);
 
-    if (enemyCenter)            mAimHold   += dt; else mAimHold   = 0.f;
-    if (stillCam && itemCenter) mPointHold += dt; else mPointHold = 0.f;
+    if (enemyCenter) mAimHold   += dt; else mAimHold   = 0.f;
+    if (itemCenter)  mPointHold += dt; else mPointHold = 0.f;
 
     // 3) Priority: Aiming > Pointing > Steering
     TaskType t = TaskType::None;

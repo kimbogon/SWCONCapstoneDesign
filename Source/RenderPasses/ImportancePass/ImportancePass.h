@@ -96,7 +96,7 @@ private:
     float mAimHold       = 0.f;
     float mPointHold     = 0.f;
     float mSteerHold     = 0.f;
-    float mHoldThreshold = 1.0f;
+    float mHoldThreshold = 0.5f;
 
     // Color readback
     uint32_t mCenterCategory = 0;   // 0=none, 1=enemy(red), 2=item(green/blue)

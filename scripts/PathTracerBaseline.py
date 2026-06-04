@@ -7,16 +7,52 @@ def render_graph_PathTracerBaseline():
     PathTracer = createPass("PathTracer", {'samplesPerPixel': 1})
     g.addPass(PathTracer, "PathTracer")
 
-    VBufferRT = createPass("VBufferRT", {'samplePattern': 'Stratified', 'sampleCount': 16, 'useAlphaTest': True})
-    g.addPass(VBufferRT, "VBufferRT")
+    GBufferRT = createPass("GBufferRT")
+    g.addPass(GBufferRT, "GBufferRT")
+
+    SVGFPass = createPass("SVGFPass", {
+        'Enabled': True,
+        'Iterations': 4,
+        'FeedbackTap': 1,
+        'VarianceEpsilon': 1e-4,
+        'PhiColor': 10.0,
+        'PhiNormal': 128.0,
+        'Alpha': 0.05,
+        'MomentsAlpha': 0.5,
+    })
+    g.addPass(SVGFPass, "SVGFPass")
+
+    ErrorMeasurePass = createPass("ErrorMeasurePass", {
+        'ComputeSquaredDifference': True,   # MSE(L2) 모드 사용
+        'ComputeAverage': True,             # RGB 평균 오차 계산
+        'IgnoreBackground': True,           # WorldPosition 입력으로 배경 픽셀 제외
+        'UseLoadedReference': False,        # Reference 입력 채널 사용 (외부 파일 불필요)
+    })
+    g.addPass(ErrorMeasurePass, "ErrorMeasurePass")
+    
+    OverlayPass = createPass("OverlayPass")
+    g.addPass(OverlayPass, "OverlayPass")
 
     # --- Edges ------------------------------------------------------------
-    g.addEdge("VBufferRT.vbuffer", "PathTracer.vbuffer")
-    g.addEdge("VBufferRT.viewW", "PathTracer.viewW")
-    g.addEdge("VBufferRT.mvec", "PathTracer.mvec")
+    g.addEdge("GBufferRT.vbuffer", "PathTracer.vbuffer")
+    g.addEdge("GBufferRT.viewW", "PathTracer.viewW")
+    g.addEdge("GBufferRT.mvecW", "PathTracer.mvec")
+
+    g.addEdge("PathTracer.color",      "SVGFPass.Color")
+    g.addEdge("PathTracer.albedo",     "SVGFPass.Albedo")
+    g.addEdge("GBufferRT.emissive",    "SVGFPass.Emission")             
+    g.addEdge("GBufferRT.mvecW",       "SVGFPass.MotionVec")
+    g.addEdge("GBufferRT.guideNormalW","SVGFPass.WorldNormal")
+    g.addEdge("GBufferRT.posW",        "SVGFPass.WorldPosition")       
+    g.addEdge("GBufferRT.linearZ",     "SVGFPass.LinearZ") 
+
+    g.addEdge("SVGFPass.Filtered image", "ErrorMeasurePass.Source")
+    g.addEdge("GBufferRT.linearZ",       "ErrorMeasurePass.WorldPosition")
+
+    g.addEdge("ErrorMeasurePass.Output",  "OverlayPass.input")
 
     # --- Output -----------------------------------------------------------
-    g.markOutput("PathTracer.color")
+    g.markOutput("OverlayPass.output")
     return g
 
 PathTracerBaseline = render_graph_PathTracerBaseline()
