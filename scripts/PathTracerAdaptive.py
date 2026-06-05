@@ -85,6 +85,8 @@ def render_graph_AdaptivePathTracer():
     # --- Output -----------------------------------------------------------
     # 최종 출력: OverlayPass.output (크로스헤어 오버레이 적용)
     g.markOutput("OverlayPass.output")
+    # Raw importance map (R32Float) — ROI 마스크 추출용
+    g.markOutput("ImportancePass.importance")
     # Importance Map 시각화 출력 등록
     g.markOutput("ImportancePass.importanceVis")
     # Sample Count Map 시각화 출력 등록
@@ -96,7 +98,6 @@ AdaptiveGraph = render_graph_AdaptivePathTracer()
 try: m.addGraph(AdaptiveGraph)
 except NameError: None
 
-'''
 # ============================================================
 # 캡처 설정
 # ============================================================
@@ -109,16 +110,17 @@ try:
     m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/test"   # 절대 경로
     m.frameCapture.baseFilename = "test"
 
-    m.clock.framerate = FIXED_FRAMERATE
-    m.clock.time = 0        # 시각 리셋
-    m.clock.frame = 0       # 프레임 카운터 리셋
-    #m.clock.exitFrame = CAPTURE_TOTAL_FRAMES  # exitTime 대신 exitFrame 사용
-
     if ENABLE_AUTO_CAPTURE:
+        m.clock.framerate = FIXED_FRAMERATE
+        m.clock.time = 0        # 시각 리셋
+        m.clock.frame = 0       # 프레임 카운터 리셋
+    
+        # CAPTURE_TOTAL_FRAMES 도달 시 자동 종료
+        m.clock.exitFrame = CAPTURE_TOTAL_FRAMES
+
         # 캡처할 프레임 번호 목록을 미리 등록
         frames_to_capture = list(range(0, CAPTURE_TOTAL_FRAMES, CAPTURE_EVERY_N_FRAMES))
         m.frameCapture.addFrames(AdaptiveGraph, frames_to_capture)
 
 except NameError:
     None  # 렌더 그래프 에디터에서 단독 로드 시 m이 없을 때 무시
-'''

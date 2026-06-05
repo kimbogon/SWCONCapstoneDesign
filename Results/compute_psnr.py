@@ -14,8 +14,8 @@ ref / test 디렉터리에 있는 EXR 프레임 시퀀스를 읽어
     --ref       레퍼런스 EXR 디렉터리 (기본값: ./reference)
     --test      테스트 EXR 디렉터리   (기본값: ./test)
     --out       결과 CSV 저장 경로     (기본값: ./psnr_result.csv)
-    --ref-pat   레퍼런스 파일명 패턴   (기본값: ref_AccumulatePass_output_{frame}.exr)
-    --test-pat  테스트 파일명 패턴     (기본값: test_AccumulatePass_output_{frame}.exr)
+    --ref-pat   레퍼런스 파일명 패턴   (기본값: ref.OverlayPass.output.{frame}.exr)
+    --test-pat  테스트 파일명 패턴     (기본값: test.OverlayPass.output.{frame}.exr)
     --step      캡처 프레임 간격       (기본값: 10)
     --total     총 프레임 수           (기본값: 300)
     --maxval    PSNR 계산용 최대값.
@@ -80,9 +80,9 @@ def main():
     parser.add_argument("--ref",      default="./reference")
     parser.add_argument("--test",     default="./test")
     parser.add_argument("--out",      default="./psnr_result.csv")
-    parser.add_argument("--ref-pat",  default="ref.AccumulatePass.output.{frame}.exr",
+    parser.add_argument("--ref-pat",  default="ref.OverlayPass.output.{frame}.exr",
                         help="레퍼런스 파일명 패턴. {frame} 이 프레임 번호로 치환됨")
-    parser.add_argument("--test-pat", default="test.AccumulatePass.output.{frame}.exr",
+    parser.add_argument("--test-pat", default="test.OverlayPass.output.{frame}.exr",
                         help="테스트 파일명 패턴")
     parser.add_argument("--step",     type=int, default=10,  help="캡처 프레임 간격")
     parser.add_argument("--total",    type=int, default=300, help="총 프레임 수")

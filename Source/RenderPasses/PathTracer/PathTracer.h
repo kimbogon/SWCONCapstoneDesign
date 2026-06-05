@@ -123,7 +123,7 @@ private:
     struct StaticParams
     {
         // Rendering parameters
-        uint32_t    samplesPerPixel = 4;                        ///< Number of samples (paths) per pixel, unless a sample density map is used.
+        uint32_t    samplesPerPixel = 1;                        ///< Number of samples (paths) per pixel, unless a sample density map is used.
         uint32_t    maxSurfaceBounces = 0;                      ///< Max number of surface bounces (diffuse + specular + transmission), up to kMaxPathLenth. This will be initialized at startup.
         uint32_t    maxDiffuseBounces = 3;                      ///< Max number of diffuse bounces (0 = direct only), up to kMaxBounces.
         uint32_t    maxSpecularBounces = 3;                     ///< Max number of specular bounces (0 = direct only), up to kMaxBounces.
@@ -225,7 +225,7 @@ private:
 //   4 : Idea C — 고중요도 픽셀 Stratified Sampling  ← 신규
 //   5 : All (A + B + C + D + E)                     ← 신규
 // ============================================================
-#define ADAPTIVE_VERSION 4
+#define ADAPTIVE_VERSION 5
 
 #if ADAPTIVE_VERSION == 0
 #define USE_IDEA_AB 0

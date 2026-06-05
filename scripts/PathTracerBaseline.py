@@ -4,7 +4,7 @@ def render_graph_PathTracerBaseline():
     g = RenderGraph("PathTracerBaseline")
 
     # --- Passes -----------------------------------------------------------
-    PathTracer = createPass("PathTracer", {'samplesPerPixel': 1})
+    PathTracer = createPass("PathTracer", {'samplesPerPixel': 4})
     g.addPass(PathTracer, "PathTracer")
 
     GBufferRT = createPass("GBufferRT")
@@ -29,7 +29,7 @@ def render_graph_PathTracerBaseline():
         'UseLoadedReference': False,        # Reference 입력 채널 사용 (외부 파일 불필요)
     })
     g.addPass(ErrorMeasurePass, "ErrorMeasurePass")
-    
+
     OverlayPass = createPass("OverlayPass")
     g.addPass(OverlayPass, "OverlayPass")
 
@@ -59,7 +59,6 @@ PathTracerBaseline = render_graph_PathTracerBaseline()
 try: m.addGraph(PathTracerBaseline)
 except NameError: None
 
-'''
 # ============================================================
 # 캡처 설정
 # ============================================================
@@ -69,19 +68,20 @@ CAPTURE_TOTAL_FRAMES = 600   # 총 프레임 수
 FIXED_FRAMERATE = 60         # 카메라 애니메이션 고정 fps
 
 try:
-    m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/reference"   # 절대 경로
-    m.frameCapture.baseFilename = "ref"
-
-    m.clock.framerate = FIXED_FRAMERATE
-    m.clock.time = 0        # 시각 리셋
-    m.clock.frame = 0       # 프레임 카운터 리셋
-    #m.clock.exitFrame = CAPTURE_TOTAL_FRAMES  # exitTime 대신 exitFrame 사용
+    m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/baseline"   # 절대 경로
+    m.frameCapture.baseFilename = "base"
 
     if ENABLE_AUTO_CAPTURE:
+        m.clock.framerate = FIXED_FRAMERATE
+        m.clock.time = 0        # 시각 리셋
+        m.clock.frame = 0       # 프레임 카운터 리셋
+    
+        # CAPTURE_TOTAL_FRAMES 도달 시 자동 종료
+        # m.clock.exitFrame = CAPTURE_TOTAL_FRAMES
+
         # 캡처할 프레임 번호 목록을 미리 등록
         frames_to_capture = list(range(0, CAPTURE_TOTAL_FRAMES, CAPTURE_EVERY_N_FRAMES))
-        m.frameCapture.addFrames(PathTracer, frames_to_capture)
+        m.frameCapture.addFrames(PathTracerBaseline, frames_to_capture)
 
 except NameError:
     None  # 렌더 그래프 에디터에서 단독 로드 시 m이 없을 때 무시
-'''
