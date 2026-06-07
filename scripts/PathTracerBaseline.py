@@ -89,9 +89,10 @@ except NameError:
 # ============================================================
 # 타이밍 측정 설정
 # ============================================================
-ENABLE_FRAMETIME_MEASUREMENT = False   # False로 바꾸면 타이밍 측정 비활성화
-WARMUP_FRAMES  = 100   # 초기 오버헤드 제외용 워밍업 프레임 수
-MEASURE_FRAMES = 200   # 실제 측정 구간 프레임 수
+ENABLE_FRAMETIME_MEASUREMENT = True   # False로 바꾸면 타이밍 측정 비활성화
+WARMUP_FRAMES    = 100   # 초기 오버헤드 제외용 워밍업 프레임 수
+CAPTURE_INTERVAL = 100   # 캡처 간격 (프레임 수) — 구간당 측정 단위
+NUM_CAPTURES     = 6     # 캡처 파일 수 (측정 구간 수 = NUM_CAPTURES - 1 = 5)
 
 # 시나리오에 따라 변경: "aiming" 또는 "pointing"
 #SCENARIO = "aiming"
@@ -108,15 +109,16 @@ try:
         # 현재 프레임 카운터 기준으로 절대 프레임 번호를 계산한다.
         # m.clock.frame은 read-only여서 리셋이 안 되므로, 현재값에서 오프셋으로 계산.
         base = m.clock.frame
-        start_frame = base + WARMUP_FRAMES
-        end_frame   = base + WARMUP_FRAMES + MEASURE_FRAMES
 
-        # 워밍업 직후 프레임(측정 시작)과 측정 완료 프레임(측정 종료) 2장만 캡처
-        # analyze_frame_time.py가 두 파일의 mtime 차이로 평균 frame time을 계산함
-        m.frameCapture.addFrames(PathTracerBaseline, [start_frame, end_frame])
+        # 워밍업 이후 CAPTURE_INTERVAL 간격으로 NUM_CAPTURES 장 캡처
+        # analyze_frame_time.py가 인접 쌍들의 mtime 차이로 구간별 frame time을 계산하고
+        # mean ± std를 산출함
+        capture_frames = [base + WARMUP_FRAMES + i * CAPTURE_INTERVAL
+                          for i in range(NUM_CAPTURES)]
+        m.frameCapture.addFrames(PathTracerBaseline, capture_frames)
 
         # exitFrame을 현재 카운터 이후로 설정 → 즉시 종료 방지
-        m.clock.exitFrame = end_frame + 1
+        m.clock.exitFrame = capture_frames[-1] + 1
 
 except NameError:
     None

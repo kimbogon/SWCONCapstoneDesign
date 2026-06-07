@@ -2,41 +2,39 @@
 analyze_frame_time.py — 1.2 frame time 측정 및 보고
 
 [원리]
-  Falcor가 캡처한 두 파일(워밍업 직후 프레임 / 측정 완료 프레임)의
-  파일 시스템 mtime 차이를 MEASURE_FRAMES으로 나눠 평균 frame time을 계산한다.
+  Falcor가 캡처한 NUM_CAPTURES(=6)장의 파일을 프레임 번호 순으로 정렬하고,
+  인접한 쌍들의 파일 시스템 mtime 차이를 구간 프레임 수로 나눠
+  구간별 평균 frame time을 계산한다.
+  5구간의 평균(mean)과 표준편차(std)를 최종 결과로 제시한다.
 
 [전제]
   PathTracerBaselineTiming.py / PathTracerAdaptiveTiming.py 실행 후
   아래 OUTPUT_BASE 아래에 캡처 파일이 생성되어 있어야 한다.
 
   디렉터리 구조 (프레임 번호는 캡처 오프셋에 따라 달라짐):
-    {OUTPUT_BASE}/baseline_aiming/          timing_base.OverlayPass.output.{N}.exr
-                                            timing_base.OverlayPass.output.{N+200}.exr
+    {OUTPUT_BASE}/baseline_aiming/    timing_base.OverlayPass.output.{N}.exr (6장)
     {OUTPUT_BASE}/baseline_pointing/  ...
-    {OUTPUT_BASE}/adaptive_aiming/          timing_adaptive.OverlayPass.output.{N}.exr
-                                            timing_adaptive.OverlayPass.output.{N+200}.exr
+    {OUTPUT_BASE}/adaptive_aiming/    timing_adaptive.OverlayPass.output.{N}.exr (6장)
     {OUTPUT_BASE}/adaptive_pointing/  ...
 
-  정확한 프레임 번호(N)는 매 실행마다 달라질 수 있으며,
-  MEASURE_FRAMES(200) 차이가 나는 쌍을 자동으로 탐색한다.
+  파일들은 프레임 번호 순으로 정렬되며, 인접 쌍마다 독립적으로 구간 측정된다.
 
 [출력]
-  - 콘솔: 시나리오별 평균 frame time 표
+  - 콘솔: 시나리오별 구간별 frame time 및 mean ± std 표
   - frame_time_results.csv
-  - frame_time_comparison.png (bar chart)
+  - frame_time_comparison.png (오차 막대 포함 bar chart)
 """
 
 import os
 import re
 import csv
-import sys
 import glob
+import statistics
 
 # ============================================================
 # 설정
 # ============================================================
-OUTPUT_BASE    = "C:/Users/bg001/Desktop/Falcor/Results/timing"
-MEASURE_FRAMES = 200   # 두 캡처 파일 사이의 프레임 차이 (시작 프레임 번호는 자동 탐색)
+OUTPUT_BASE = "C:/Users/bg001/Desktop/Falcor/Results/timing"
 
 # 결과물 저장 경로
 RESULTS_DIR = OUTPUT_BASE
@@ -44,13 +42,12 @@ CSV_PATH    = os.path.join(RESULTS_DIR, "frame_time_results.csv")
 PLOT_PATH   = os.path.join(RESULTS_DIR, "frame_time_comparison.png")
 
 # ============================================================
-# mtime 기반 평균 frame time 계산
+# 파일 시퀀스 탐색
 # ============================================================
-def find_frame_pair(run_dir: str, base_filename: str, frame_gap: int):
+def find_frame_sequence(run_dir: str, base_filename: str):
     """
-    run_dir 안의 캡처 파일 전체를 스캔해 frame_gap 만큼 차이나는
-    (f_start_path, f_end_path, start_no, end_no) 쌍을 반환한다.
-    쌍이 없으면 (None, None, None, None) 반환.
+    run_dir 안의 캡처 파일 전체를 스캔해 프레임 번호 오름차순으로
+    [(frame_no, filepath), ...] 리스트를 반환한다.
 
     Falcor 캡처 파일명 패턴: {baseFilename}.{output_name}.{frame}.exr
     output_name에 점(.)이 포함될 수 있으므로 마지막 숫자 토큰을 프레임 번호로 파싱한다.
@@ -69,38 +66,50 @@ def find_frame_pair(run_dir: str, base_filename: str, frame_gap: int):
                os.path.getmtime(filepath) > os.path.getmtime(frame_map[frame_no]):
                 frame_map[frame_no] = filepath
 
-    # 오름차순으로 순회하며 frame_gap 차이 쌍을 찾음
-    for start_no in sorted(frame_map):
-        end_no = start_no + frame_gap
-        if end_no in frame_map:
-            return frame_map[start_no], frame_map[end_no], start_no, end_no
-
-    return None, None, None, None
+    return sorted(frame_map.items())  # [(frame_no, path), ...]
 
 
-def compute_avg_frame_time(run_dir: str, base_filename: str,
-                           frame_gap: int) -> float:
+# ============================================================
+# 구간별 frame time 계산 → mean ± std 반환
+# ============================================================
+def compute_avg_frame_time(run_dir: str, base_filename: str) -> tuple:
     """
-    run_dir 안에서 frame_gap 만큼 차이나는 캡처 파일 쌍을 자동으로 찾아
-    mtime 차이 / frame_gap 을 ms 단위로 반환한다.
-    파일 쌍을 못 찾으면 None 반환.
+    캡처 파일 시퀀스에서 인접 쌍들의 구간별 frame time(ms)을 계산하고
+    (mean_ms, std_ms) 를 반환한다.
+    캡처 파일이 2개 미만이면 (None, None) 반환.
     """
-    f_start, f_end, start_no, end_no = find_frame_pair(run_dir, base_filename, frame_gap)
+    sequence = find_frame_sequence(run_dir, base_filename)
 
-    if f_start is None or f_end is None:
-        print(f"  [경고] {run_dir}: {frame_gap} 프레임 차이 쌍을 찾지 못했음 → 건너뜀")
-        return None
+    if len(sequence) < 2:
+        print(f"  [경고] {run_dir}: 캡처 파일이 2개 미만 → 건너뜀")
+        return None, None
 
-    t_start = os.path.getmtime(f_start)
-    t_end   = os.path.getmtime(f_end)
-    elapsed_ms = (t_end - t_start) * 1000.0
-    avg_ms     = elapsed_ms / frame_gap
+    measurements = []
+    for i in range(len(sequence) - 1):
+        fn_start, path_start = sequence[i]
+        fn_end,   path_end   = sequence[i + 1]
+        frame_diff = fn_end - fn_start
+        if frame_diff <= 0:
+            continue
 
-    print(f"  시작 파일 : {os.path.basename(f_start)}  (frame {start_no})")
-    print(f"  종료 파일 : {os.path.basename(f_end)}  (frame {end_no})")
-    print(f"  경과 시간 : {elapsed_ms:.1f} ms / {frame_gap} 프레임")
-    print(f"  평균 frame time : {avg_ms:.3f} ms  ({1000.0/avg_ms:.1f} FPS)")
-    return avg_ms
+        elapsed_ms = (os.path.getmtime(path_end) - os.path.getmtime(path_start)) * 1000.0
+        interval_avg_ms = elapsed_ms / frame_diff
+        measurements.append(interval_avg_ms)
+
+        print(f"  구간 {i + 1}: frame {fn_start}→{fn_end} ({frame_diff}f) "
+              f" {elapsed_ms:.1f} ms  →  {interval_avg_ms:.3f} ms/f "
+              f" ({1000.0 / interval_avg_ms:.1f} FPS)")
+
+    if not measurements:
+        return None, None
+
+    mean_ms = statistics.mean(measurements)
+    # 구간이 1개뿐이면 std 계산 불가 → 0으로 처리
+    std_ms  = statistics.stdev(measurements) if len(measurements) > 1 else 0.0
+
+    print(f"  ─────────────────────────────────────────────────────")
+    print(f"  평균: {mean_ms:.3f} ms  std: {std_ms:.3f} ms  ({1000.0 / mean_ms:.1f} FPS)")
+    return mean_ms, std_ms
 
 
 # ============================================================
@@ -108,10 +117,10 @@ def compute_avg_frame_time(run_dir: str, base_filename: str,
 # ============================================================
 RUNS = [
     # (파이프라인, 시나리오, 서브디렉터리, 기본파일명)
-    ("Baseline",  "Aiming",            "baseline_aiming",            "timing_base"),
-    ("Baseline",  "Pointing",          "baseline_pointing",          "timing_base"),
-    ("Adaptive",  "Aiming",            "adaptive_aiming",            "timing_adaptive"),
-    ("Adaptive",  "Pointing",          "adaptive_pointing",          "timing_adaptive"),
+    ("Baseline", "Aiming",   "baseline_aiming",   "timing_base"),
+    ("Baseline", "Pointing", "baseline_pointing", "timing_base"),
+    ("Adaptive", "Aiming",   "adaptive_aiming",   "timing_adaptive"),
+    ("Adaptive", "Pointing", "adaptive_pointing", "timing_adaptive"),
 ]
 
 results = []
@@ -125,27 +134,29 @@ for pipeline, scenario, subdir, base_fn in RUNS:
 
     if not os.path.isdir(run_dir):
         print(f"  [경고] 디렉터리 없음: {run_dir}")
-        avg_ms = None
+        mean_ms = std_ms = None
     else:
-        avg_ms = compute_avg_frame_time(run_dir, base_fn, MEASURE_FRAMES)
+        mean_ms, std_ms = compute_avg_frame_time(run_dir, base_fn)
 
     results.append({
-        "pipeline": pipeline,
-        "scenario": scenario,
-        "avg_frame_time_ms": round(avg_ms, 3) if avg_ms is not None else "N/A",
-        "fps": round(1000.0 / avg_ms, 1) if avg_ms is not None else "N/A",
+        "pipeline":            pipeline,
+        "scenario":            scenario,
+        "mean_frame_time_ms":  round(mean_ms, 3) if mean_ms is not None else "N/A",
+        "std_frame_time_ms":   round(std_ms,  3) if std_ms  is not None else "N/A",
+        "fps":                 round(1000.0 / mean_ms, 1) if mean_ms is not None else "N/A",
     })
 
 # ============================================================
 # 결과 출력
 # ============================================================
 print("\n" + "=" * 60)
-print(f"{'Pipeline':<12} {'Scenario':<22} {'Avg Frame Time':>16}  {'FPS':>8}")
+print(f"{'Pipeline':<12} {'Scenario':<22} {'Mean Frame Time':>16}  {'Std':>8}  {'FPS':>8}")
 print("-" * 60)
 for r in results:
-    ft  = f"{r['avg_frame_time_ms']} ms" if r['avg_frame_time_ms'] != "N/A" else "N/A"
+    ft  = f"{r['mean_frame_time_ms']} ms" if r['mean_frame_time_ms'] != "N/A" else "N/A"
+    std = f"±{r['std_frame_time_ms']} ms" if r['std_frame_time_ms']  != "N/A" else "N/A"
     fps = str(r['fps'])
-    print(f"{r['pipeline']:<12} {r['scenario']:<22} {ft:>16}  {fps:>8}")
+    print(f"{r['pipeline']:<12} {r['scenario']:<22} {ft:>16}  {std:>10}  {fps:>8}")
 print("=" * 60)
 
 # ============================================================
@@ -153,14 +164,15 @@ print("=" * 60)
 # ============================================================
 os.makedirs(RESULTS_DIR, exist_ok=True)
 with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
-    writer = csv.DictWriter(f, fieldnames=["pipeline", "scenario",
-                                           "avg_frame_time_ms", "fps"])
+    writer = csv.DictWriter(f, fieldnames=[
+        "pipeline", "scenario", "mean_frame_time_ms", "std_frame_time_ms", "fps"
+    ])
     writer.writeheader()
     writer.writerows(results)
 print(f"\nCSV 저장: {CSV_PATH}")
 
 # ============================================================
-# Bar chart 생성
+# Bar chart 생성 (오차 막대 포함)
 # ============================================================
 try:
     import matplotlib
@@ -168,35 +180,40 @@ try:
     import matplotlib.pyplot as plt
     import numpy as np
 
-    scenarios  = ["Aiming", "Pointing"]
-    pipelines  = ["Baseline", "Adaptive"]
-    colors     = {"Baseline": "#4C72B0", "Adaptive": "#DD8452"}
+    scenarios = ["Aiming", "Pointing"]
+    pipelines = ["Baseline", "Adaptive"]
+    colors    = {"Baseline": "#4C72B0", "Adaptive": "#DD8452"}
 
     # 유효한 측정값만 추출
-    data = {}
+    means = {}
+    stds  = {}
     for r in results:
         key = (r["pipeline"], r["scenario"])
-        val = r["avg_frame_time_ms"]
-        data[key] = float(val) if val != "N/A" else 0.0
+        m_val = r["mean_frame_time_ms"]
+        s_val = r["std_frame_time_ms"]
+        means[key] = float(m_val) if m_val != "N/A" else 0.0
+        stds[key]  = float(s_val) if s_val != "N/A" else 0.0
 
-    x      = np.arange(len(scenarios))
-    width  = 0.35
+    x     = np.arange(len(scenarios))
+    width = 0.35
     fig, ax = plt.subplots(figsize=(8, 5))
 
     for i, pipe in enumerate(pipelines):
-        vals = [data.get((pipe, sc), 0.0) for sc in scenarios]
+        vals = [means.get((pipe, sc), 0.0) for sc in scenarios]
+        errs = [stds.get((pipe, sc),  0.0) for sc in scenarios]
         bars = ax.bar(x + (i - 0.5) * width, vals, width,
-                      label=pipe, color=colors[pipe], alpha=0.85)
+                      label=pipe, color=colors[pipe], alpha=0.85,
+                      yerr=errs, capsize=5, error_kw={"elinewidth": 1.5})
         # 막대 위에 수치 표시
-        for bar, v in zip(bars, vals):
+        for bar, v, e in zip(bars, vals, errs):
             if v > 0:
                 ax.text(bar.get_x() + bar.get_width() / 2,
-                        bar.get_height() + 0.3,
+                        bar.get_height() + e + 0.3,
                         f"{v:.1f} ms", ha="center", va="bottom", fontsize=9)
 
     ax.set_xlabel("Scenario")
-    ax.set_ylabel("Avg Frame Time (ms)")
-    ax.set_title("Frame Time Comparison: Baseline vs Adaptive")
+    ax.set_ylabel("Mean Frame Time (ms)")
+    ax.set_title("Frame Time Comparison: Baseline vs Adaptive\n(error bars = ±1 std, 5 intervals per run)")
     ax.set_xticks(x)
     ax.set_xticklabels(scenarios)
     ax.legend()
