@@ -124,3 +124,55 @@ try:
 
 except NameError:
     None  # 렌더 그래프 에디터에서 단독 로드 시 m이 없을 때 무시
+
+# ============================================================
+# 타이밍 측정 설정
+# ============================================================
+ENABLE_FRAMETIME_MEASUREMENT = False   # False로 바꾸면 타이밍 측정 비활성화
+WARMUP_FRAMES  = 100   # 초기 오버헤드 제외용 워밍업 프레임 수
+MEASURE_FRAMES = 200   # 실제 측정 구간 프레임 수
+
+# 시나리오에 따라 변경: "aiming" 또는 "pointing"
+#SCENARIO = "aiming"
+SCENARIO = "pointing"
+
+OUTPUT_BASE = "C:/Users/bg001/Desktop/Falcor/Results/timing"
+
+try:
+    output_dir = OUTPUT_BASE + "/adaptive_" + SCENARIO
+    m.frameCapture.outputDir    = output_dir
+    m.frameCapture.baseFilename = "timing_adaptive"
+
+    if ENABLE_FRAMETIME_MEASUREMENT:
+        # 현재 프레임 카운터 기준으로 절대 프레임 번호를 계산한다.
+        # m.clock.frame은 read-only여서 리셋이 안 되므로, 현재값에서 오프셋으로 계산.
+        base = m.clock.frame
+        start_frame = base + WARMUP_FRAMES
+        end_frame   = base + WARMUP_FRAMES + MEASURE_FRAMES
+
+        # 워밍업 직후 프레임(측정 시작)과 측정 완료 프레임(측정 종료) 2장만 캡처
+        # analyze_frame_time.py가 두 파일의 mtime 차이로 평균 frame time을 계산함
+        m.frameCapture.addFrames(AdaptiveGraph, [start_frame, end_frame])
+
+        # exitFrame을 현재 카운터 이후로 설정 → 즉시 종료 방지
+        m.clock.exitFrame = end_frame + 1
+
+    '''
+    if ENABLE_FRAMETIME_MEASUREMENT:
+        # 워밍업 직후 프레임(측정 시작)과 측정 완료 프레임(측정 종료) 2장만 캡처
+        # analyze_frame_time.py가 두 파일의 mtime 차이로 평균 frame time을 계산함
+        start_frame = WARMUP_FRAMES
+        end_frame   = WARMUP_FRAMES + MEASURE_FRAMES
+        m.frameCapture.addFrames(AdaptiveGraph, [start_frame, end_frame])
+
+        # 측정 완료 후 자동 종료 (end_frame 렌더링 보장을 위해 +1)
+        m.clock.exitFrame = end_frame + 1
+
+        # 고정 프레임레이트 비활성화: 실제 GPU 렌더 속도로 동작
+        # (m.clock.framerate 미설정 = 실시간 모드)
+        m.clock.time  = 0
+        m.clock.frame = 0
+    '''
+
+except NameError:
+    None

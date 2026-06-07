@@ -225,7 +225,7 @@ private:
 //   4 : Idea C — 고중요도 픽셀 Stratified Sampling  ← 신규
 //   5 : All (A + B + C + D + E)                     ← 신규
 // ============================================================
-#define ADAPTIVE_VERSION 5
+#define ADAPTIVE_VERSION 0
 
 #if ADAPTIVE_VERSION == 0
 #define USE_IDEA_AB 0
