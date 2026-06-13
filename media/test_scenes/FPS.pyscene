@@ -184,7 +184,7 @@ sceneBuilder.addAnimation(enemyAnim)
 #   'pointing' — camera_pointing_steering.py 시나리오 재생
 #   'none'     — 카메라 애니메이션 없음
 # ============================================================
-CAMERA_ANIMATION = 'none'
+CAMERA_ANIMATION = 'aiming'
 
 _up = float3(0, 1, 0)
 

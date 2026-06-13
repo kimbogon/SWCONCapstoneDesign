@@ -1,0 +1,5 @@
+pipeline,scenario,mean_frame_time_ms,std_frame_time_ms,fps
+Baseline,Aiming,34.77,0.393,28.8
+Baseline,Pointing,35.001,0.69,28.6
+Adaptive,Aiming,41.106,0.256,24.3
+Adaptive,Pointing,40.75,0.076,24.5

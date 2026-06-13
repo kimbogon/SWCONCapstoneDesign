@@ -1,4 +1,5 @@
 from falcor import *
+import os   # 캡처 폴더 자동 생성을 위해 추가
 
 def render_graph_PathTracerBaseline():
     g = RenderGraph("PathTracerBaseline")
@@ -68,7 +69,8 @@ CAPTURE_TOTAL_FRAMES = 600   # 총 프레임 수
 FIXED_FRAMERATE = 60         # 카메라 애니메이션 고정 fps
 
 try:
-    m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/reference"   # 절대 경로
+    m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/ROI_PSNR_analysis/reference"   # 절대 경로
+    os.makedirs(m.frameCapture.outputDir, exist_ok=True)   # 캡처 폴더가 없으면 생성
     m.frameCapture.baseFilename = "ref"
 
     if ENABLE_AUTO_CAPTURE:

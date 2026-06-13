@@ -13,8 +13,8 @@ analyze_frame_time.py — 1.2 frame time 측정 및 보고
   디렉터리 구조:
     {OUTPUT_BASE}/baseline_aiming/   timing_base.OverlayPass.output.{N}.exr      (6장)
     {OUTPUT_BASE}/baseline_pointing/ ...
-    {OUTPUT_BASE}/adaptive_aiming/   timing_adaptive.OverlayPass.output.{N}.exr  (6장)
-    {OUTPUT_BASE}/adaptive_pointing/ ...
+    {OUTPUT_BASE}/test_aiming/       timing_adaptive.OverlayPass.output.{N}.exr  (6장)
+    {OUTPUT_BASE}/test_pointing/     ...
 
 [출력]
   - 콘솔: 시나리오별 구간별 frame time 및 mean ± std 표
@@ -31,7 +31,7 @@ import statistics
 # ============================================================
 # 설정
 # ============================================================
-OUTPUT_BASE    = "C:/Users/bg001/Desktop/Falcor/Results/timing"
+OUTPUT_BASE    = "C:/Users/bg001/Desktop/Falcor/Results/frame_time_analysis"
 MEASURE_FRAMES = 500   # PathTracerBaseline/Adaptive.py의 MEASURE_FRAMES와 일치해야 함
 
 RESULTS_DIR = OUTPUT_BASE
@@ -111,8 +111,8 @@ RUNS = [
     # (파이프라인, 시나리오, 서브디렉터리, 기본파일명)
     ("Baseline", "Aiming",   "baseline_aiming",   "timing_base"),
     ("Baseline", "Pointing", "baseline_pointing", "timing_base"),
-    ("Adaptive", "Aiming",   "adaptive_aiming",   "timing_adaptive"),
-    ("Adaptive", "Pointing", "adaptive_pointing", "timing_adaptive"),
+    ("Adaptive", "Aiming",   "test_aiming",   "timing_adaptive"),
+    ("Adaptive", "Pointing", "test_pointing", "timing_adaptive"),
 ]
 
 results = []

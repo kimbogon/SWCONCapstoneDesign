@@ -1,4 +1,5 @@
 from falcor import *
+import os   # 캡처 폴더 자동 생성을 위해 추가
 
 def render_graph_PathTracerBaseline():
     g = RenderGraph("PathTracerBaseline")
@@ -68,7 +69,8 @@ CAPTURE_TOTAL_FRAMES = 600   # 총 프레임 수
 FIXED_FRAMERATE = 60         # 카메라 애니메이션 고정 fps
 
 try:
-    m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/baseline"   # 절대 경로
+    m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/ROI_PSNR_analysis/baseline"   # 절대 경로
+    os.makedirs(m.frameCapture.outputDir, exist_ok=True)   # 캡처 폴더가 없으면 생성
     m.frameCapture.baseFilename = "base"
 
     if ENABLE_AUTO_CAPTURE:
@@ -103,13 +105,14 @@ NUM_INTERVALS   = 5     # 구간 수 (캡처 파일 = NUM_INTERVALS + 1 = 6장)
 SCENARIO = "aiming"
 #SCENARIO = "pointing"
 
-OUTPUT_BASE = "C:/Users/bg001/Desktop/Falcor/Results/timing"
+OUTPUT_BASE = "C:/Users/bg001/Desktop/Falcor/Results/frame_time_analysis"
 
 try:
     if ENABLE_FRAMETIME_MEASUREMENT:
         # outputDir/baseFilename 설정을 if 블록 안으로 이동:
         # 비활성화 시 위 '캡처 설정'의 출력 경로/파일명을 덮어쓰지 않도록 함
         output_dir = OUTPUT_BASE + "/baseline_" + SCENARIO
+        os.makedirs(output_dir, exist_ok=True)   # 캡처 폴더가 없으면 생성
         m.frameCapture.outputDir    = output_dir
         m.frameCapture.baseFilename = "timing_base"
 
