@@ -96,7 +96,10 @@ private:
     float mAimHold       = 0.f;
     float mPointHold     = 0.f;
     float mSteerHold     = 0.f;
-    float mHoldThreshold = 0.5f;
+    // Aiming / Pointing 판정 임계값 (초)
+    float mAimPointHoldThreshold = 0.5f;
+    // Steering 판정 임계값 (초)
+    float mSteerHoldThreshold    = 1.0f;
 
     // Color readback
     uint32_t mCenterCategory = 0;   // 0=none, 1=enemy(red), 2=item(green/blue)

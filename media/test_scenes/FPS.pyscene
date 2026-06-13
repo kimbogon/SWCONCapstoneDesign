@@ -5,14 +5,16 @@ from falcor import *
 # ------------------------------------------------------------
 quadMesh   = TriangleMesh.createQuad() # 2D 평면
 cubeMesh   = TriangleMesh.createCube() # 3D 입체
-sphereMesh   = TriangleMesh.createSphere(radius=0.4)
+sphereMesh = TriangleMesh.createSphere()
+enemyMesh  = TriangleMesh.createSphere(radius=0.4)
+
 
 # ------------------------------------------------------------
 # 2. 머티리얼 생성
 # ------------------------------------------------------------
-matFloor = StandardMaterial('Floor')            # 머터리얼 객체 선언
-matFloor.baseColor = float4(0.6, 0.6, 0.6, 1.0) # baseColor 속성 지정
-matFloor.roughness = 0.8                        # roughness 속성 지정
+matFloor = StandardMaterial('Floor')              # 머터리얼 객체 선언
+matFloor.baseColor = float4(0.6, 0.6, 0.6, 1.0)   # baseColor 속성 지정
+matFloor.roughness = 0.9                          # roughness 속성 지정
 
 matWall = StandardMaterial('Wall')
 matWall.baseColor = float4(0.7, 0.7, 0.7, 1.0)
@@ -20,25 +22,32 @@ matWall.roughness = 0.9
 
 matEnemy = StandardMaterial('Enemy')
 matEnemy.baseColor = float4(0.9, 0.2, 0.2, 1.0)   # 빨간 구
-matEnemy.roughness = 0.3
-# matEnemy.metallic  = 0.6
+matEnemy.roughness = 0.5
 
-matGreen = StandardMaterial('GreenCube')
-matGreen.baseColor = float4(0.1, 0.8, 0.2, 1.0)
-matGreen.roughness = 0.5
+matItem = StandardMaterial('Item')
+matItem.baseColor = float4(0.1, 0.8, 0.2, 1.0)    # 녹색 아이템
+matItem.roughness = 0.5
 
-matBlue = StandardMaterial('BlueCube')
-matBlue.baseColor = float4(0.1, 0.3, 0.9, 1.0)
-matBlue.roughness = 0.5
+matCube = StandardMaterial('Cube')
+matCube.baseColor = float4(0.7, 0.7, 0.0, 1.0)   
+matCube.roughness = 0.7
+
+matSphere = StandardMaterial('Sphere')
+matSphere.baseColor = float4(0.2, 0.2, 0.9, 1.0)   
+matSphere.roughness = 0.3
+
 
 # ------------------------------------------------------------
 # 3. 메시를 SceneBuilder에 등록
 # ------------------------------------------------------------
-floorMeshID = sceneBuilder.addTriangleMesh(quadMesh, matFloor) # 메시 + 머터리얼을 인자로 넣어 등록
+# 메시 + 머터리얼을 인자로 넣어 등록
+
+floorMeshID = sceneBuilder.addTriangleMesh(quadMesh, matFloor) 
 wallMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matWall)
-sphereMeshID = sceneBuilder.addTriangleMesh(sphereMesh, matEnemy)
-greenCubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matGreen)
-blueCubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matBlue)
+enemyMeshID = sceneBuilder.addTriangleMesh(enemyMesh, matEnemy)
+itemMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matItem)
+cubeMeshID = sceneBuilder.addTriangleMesh(cubeMesh, matCube)
+sphereMeshID = sceneBuilder.addTriangleMesh(sphereMesh, matSphere)
 
 # ------------------------------------------------------------
 # 4. 노드 추가 + 메시 인스턴스 연결
@@ -94,23 +103,33 @@ sceneBuilder.addMeshInstance(fenceNodeID, wallMeshID)
 # 벽이 x=-3 ~ x=3 이므로 좌우 진폭은 ±1.8 으로 여유있게 설정
 # 초기 위치: 중앙, 눈높이(y=1.7), z=2 (카메라 정면)
 enemyNodeID = sceneBuilder.addNode('enemy', Transform(
+    scaling=0.1,
     translation=float3(0, 1.7, 2)
 ))
-sceneBuilder.addMeshInstance(enemyNodeID, sphereMeshID)
+sceneBuilder.addMeshInstance(enemyNodeID, enemyMeshID)
 
-# 초록색 큐브 
-greenCubeNodeID = sceneBuilder.addNode('cube_green', Transform(
-    scaling=float3(0.5, 0.5, 0.5),
+# 초록색 큐브 아이템 오브젝트 
+itemNodeID = sceneBuilder.addNode('item', Transform(
+    scaling=0.5,
     translation=float3(-7, 0.25, -2)
 ))
-sceneBuilder.addMeshInstance(greenCubeNodeID, greenCubeMeshID)
+sceneBuilder.addMeshInstance(itemNodeID, itemMeshID)
 
-# 파란색 큐브 
-blueCubeNodeID = sceneBuilder.addNode('cube_blue', Transform(
-    scaling=float3(0.5, 0.5, 0.5),
-    translation=float3(-7, 0.25, -5)
+# 배경 오브젝트: 큐브
+cubeNodeID = sceneBuilder.addNode('Cube', Transform(
+    scaling=4, 
+    translation=float3(4, 2, 5), 
+    rotationEulerDeg=float3(90, 0, 0)
 ))
-sceneBuilder.addMeshInstance(blueCubeNodeID, blueCubeMeshID)
+sceneBuilder.addMeshInstance(cubeNodeID, cubeMeshID)
+
+# 배경 오브젝트: 구
+sphereNodeID = sceneBuilder.addNode('Sphere', Transform(
+    scaling=2, 
+    translation=float3(-4, 2, 5)
+))
+sceneBuilder.addMeshInstance(sphereNodeID, sphereMeshID)
+
 
 # ------------------------------------------------------------
 # 5. 카메라
@@ -122,12 +141,6 @@ camera.up          = float3(0, 1, 0)
 camera.focalLength = 21
 sceneBuilder.addCamera(camera)
 
-#_cam_anim = sceneBuilder.createAnimation(camera, 'recorded', 86400.0000)
-
-# 여기에 keyframe 삽입
-
-#_cam_anim.postInfinityBehavior = Animation.Behavior.Constant
-
 # ------------------------------------------------------------
 # 6. 조명
 # ------------------------------------------------------------
@@ -137,6 +150,13 @@ dirLight.direction = float3(0, -1, 0)  # 정확히 수직 아래
 dirLight.intensity = float3(5, 5, 5)
 dirLight.angle = 0.1
 sceneBuilder.addLight(dirLight)
+
+'''
+pointLight = PointLight()
+pointLight.position = float3(-7, 2, -2)
+pointLight.intensity = float3(25,25,0)
+sceneBuilder.addLight(pointLight)
+'''
 
 # ------------------------------------------------------------
 # 7. 오브젝트 애니메이션
@@ -164,7 +184,7 @@ sceneBuilder.addAnimation(enemyAnim)
 #   'pointing' — camera_pointing_steering.py 시나리오 재생
 #   'none'     — 카메라 애니메이션 없음
 # ============================================================
-CAMERA_ANIMATION = 'pointing'
+CAMERA_ANIMATION = 'none'
 
 _up = float3(0, 1, 0)
 

@@ -263,15 +263,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     // 1단계 (1): Image-space max-variance importance
     // =========================================================
     float albedoVar  = scalarVar3x3(p, true);
-    float metVar     = scalarVar3x3(p, false);
     float guideNVar  = normalVar3x3(p, true);
-    float faceNVar   = normalVar3x3(p, false);
+    float faceNVar = normalVar3x3(p, false);
+    float metalness = sampleMet(p);
     float glossiness = 1.f - sampleRough(p);  // rough=1 -> gloss=0
 
     float imageImp = max(albedoVar,
-                    max(metVar,
                     max(guideNVar,
-                    max(faceNVar, glossiness))));
+                    max(faceNVar, 
+                    max(metalness, glossiness))));
 
     // =========================================================
     // 1단계 (2): Task-Object space importance
@@ -314,6 +314,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         importance *= saturate(L / max(lumLow, 1e-4f));
     else if (L > lumHigh)
         importance *= saturate((1.f - L) / max(1.f - lumHigh, 1e-4f));
+
+
 
     // =========================================================
     // 2단계 (C): Motion penalty

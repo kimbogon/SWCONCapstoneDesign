@@ -122,16 +122,21 @@ void ImportancePass::readbackCenterCategory()
 // ---------------------------------------------------------------------------
 void ImportancePass::updateTaskState(float dt)
 {
-    // 1) Camera-movement detection via ViewProj matrix comparison
+    // 1) Camera-movement detection via camera position comparison
+    //    ViewProj 행렬은 위치뿐 아니라 방향(회전) 변화에도 바뀌므로,
+    //    회전만 했을 때에도 Steering 이 활성화되던 문제가 있었다.
+    //    위치 변화만 반영하기 위해 카메라의 월드 위치만 비교한다.
     bool camMoved = false;
     if (mpScene && mpScene->getCamera())
     {
-        const float4x4 vp = mpScene->getCamera()->getViewProjMatrix();
-        for (int i = 0; i < 4 && !camMoved; ++i)
-            for (int j = 0; j < 4 && !camMoved; ++j)
-                if (std::abs(vp[i][j] - mPrevViewProj[i][j]) > 1e-6f)
-                    camMoved = true;
-        mPrevViewProj = vp;
+        const float3 camPos = mpScene->getCamera()->getPosition();
+        // 이전 프레임의 카메라 위치 (최초 프레임은 현재 위치로 초기화)
+        static float3 sPrevCamPos = camPos;
+        if (std::abs(camPos.x - sPrevCamPos.x) > 1e-6f ||
+            std::abs(camPos.y - sPrevCamPos.y) > 1e-6f ||
+            std::abs(camPos.z - sPrevCamPos.z) > 1e-6f)
+            camMoved = true;
+        sPrevCamPos = camPos;
     }
     mCameraMoved = camMoved;
 
@@ -149,9 +154,10 @@ void ImportancePass::updateTaskState(float dt)
 
     // 3) Priority: Aiming > Pointing > Steering
     TaskType t = TaskType::None;
-    if      (mAimHold   >= mHoldThreshold) t = TaskType::Aiming;
-    else if (mPointHold >= mHoldThreshold) t = TaskType::Pointing;
-    else if (mSteerHold >= mHoldThreshold) t = TaskType::Steering;
+    // Aiming / Pointing 은 동일 임계값, Steering 은 별도 임계값 사용
+    if      (mAimHold   >= mAimPointHoldThreshold) t = TaskType::Aiming;
+    else if (mPointHold >= mAimPointHoldThreshold) t = TaskType::Pointing;
+    else if (mSteerHold >= mSteerHoldThreshold)    t = TaskType::Steering;
 
     mCB.activeTask = static_cast<uint32_t>(t);
 
@@ -272,13 +278,14 @@ void ImportancePass::renderUI(Gui::Widgets& widget)
     widget.text(std::string("Active task: ") + kTaskNames[taskIdx]);
     widget.text("Center category: " + std::to_string(mCenterCategory) + "  (1=enemy, 2=item)");
 
-    widget.var("Hold threshold (s)", mHoldThreshold,      0.05f, 2.0f,  0.01f);
+    widget.var("Aim/Point hold (s)", mAimPointHoldThreshold, 0.05f, 2.0f, 0.01f);
+    widget.var("Steering hold (s)",  mSteerHoldThreshold,    0.05f, 2.0f, 0.01f);
     widget.var("Center radius (UV)", mCenterRadiusUV,     0.0f,  0.5f,  0.005f);
     widget.var("Task importance",    mTaskImportance,     0.0f,  1.0f,  0.01f);
     widget.var("Enemy red thr",      mEnemyRedThreshold,  0.0f,  1.0f,  0.01f);
     widget.var("Item GB thr",        mItemGBThreshold,    0.0f,  1.0f,  0.01f);
-    widget.var("Lum low",            mLumLow,             0.0f,  0.5f,  0.005f);
-    widget.var("Lum high",           mLumHigh,            0.5f,  1.0f,  0.005f);
+    widget.var("Lum low",            mLumLow,             0.0f,  1.0f,  0.005f);
+    widget.var("Lum high",           mLumHigh,            0.0f,  1.0f,  0.005f);
     widget.var("Motion A",           mMotionA,            0.0f,  5.0f,  0.01f);
     widget.var("Motion B",           mMotionB,            0.0f,  8.0f,  0.05f);
     widget.var("Motion C",           mMotionC,            0.0f,  2.0f,  0.01f);

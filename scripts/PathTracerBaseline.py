@@ -89,36 +89,39 @@ except NameError:
 # ============================================================
 # 타이밍 측정 설정
 # ============================================================
-ENABLE_FRAMETIME_MEASUREMENT = True   # False로 바꾸면 타이밍 측정 비활성화
-WARMUP_FRAMES    = 100   # 초기 오버헤드 제외용 워밍업 프레임 수
-CAPTURE_INTERVAL = 100   # 캡처 간격 (프레임 수) — 구간당 측정 단위
-NUM_CAPTURES     = 6     # 캡처 파일 수 (측정 구간 수 = NUM_CAPTURES - 1 = 5)
+# [방법] 워밍업 후 500프레임 구간 5개를 연속 캡처(경계점 6장).
+#        각 구간 = mtime 차이 / 500 → 5개 값으로 mean ± std 산출.
+#        구간 끝 캡처 스톨은 다음 구간 시작점에서 상쇄되므로 구간 내 오차 ~13%.
+# ============================================================
+ENABLE_FRAMETIME_MEASUREMENT = False   # True로 바꾸면 타이밍 측정 활성화
+
+WARMUP_FRAMES   = 100   # 초기 오버헤드 제외용 워밍업 프레임 수
+MEASURE_FRAMES  = 500   # 구간당 프레임 수
+NUM_INTERVALS   = 5     # 구간 수 (캡처 파일 = NUM_INTERVALS + 1 = 6장)
 
 # 시나리오에 따라 변경: "aiming" 또는 "pointing"
-#SCENARIO = "aiming"
-SCENARIO = "pointing"
+SCENARIO = "aiming"
+#SCENARIO = "pointing"
 
 OUTPUT_BASE = "C:/Users/bg001/Desktop/Falcor/Results/timing"
 
 try:
-    output_dir = OUTPUT_BASE + "/baseline_" + SCENARIO
-    m.frameCapture.outputDir   = output_dir
-    m.frameCapture.baseFilename = "timing_base"
-
     if ENABLE_FRAMETIME_MEASUREMENT:
-        # 현재 프레임 카운터 기준으로 절대 프레임 번호를 계산한다.
-        # m.clock.frame은 read-only여서 리셋이 안 되므로, 현재값에서 오프셋으로 계산.
+        # outputDir/baseFilename 설정을 if 블록 안으로 이동:
+        # 비활성화 시 위 '캡처 설정'의 출력 경로/파일명을 덮어쓰지 않도록 함
+        output_dir = OUTPUT_BASE + "/baseline_" + SCENARIO
+        m.frameCapture.outputDir    = output_dir
+        m.frameCapture.baseFilename = "timing_base"
+
+        # m.clock.frame은 read-only라 리셋 불가 → 현재값 기준 절대 프레임 번호 계산
         base = m.clock.frame
 
-        # 워밍업 이후 CAPTURE_INTERVAL 간격으로 NUM_CAPTURES 장 캡처
-        # analyze_frame_time.py가 인접 쌍들의 mtime 차이로 구간별 frame time을 계산하고
-        # mean ± std를 산출함
-        capture_frames = [base + WARMUP_FRAMES + i * CAPTURE_INTERVAL
-                          for i in range(NUM_CAPTURES)]
+        # 구간 경계점 6장 캡처: [W, W+500, W+1000, W+1500, W+2000, W+2500]
+        capture_frames = [base + WARMUP_FRAMES + i * MEASURE_FRAMES
+                          for i in range(NUM_INTERVALS + 1)]
         m.frameCapture.addFrames(PathTracerBaseline, capture_frames)
-
-        # exitFrame을 현재 카운터 이후로 설정 → 즉시 종료 방지
         m.clock.exitFrame = capture_frames[-1] + 1
 
 except NameError:
     None
+

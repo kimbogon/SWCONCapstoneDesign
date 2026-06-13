@@ -30,7 +30,7 @@ REF_DIR        = "C:/Users/bg001/Desktop/Falcor/Results/reference"
 BASELINE_DIR   = "C:/Users/bg001/Desktop/Falcor/Results/baseline"
 ADAPTIVE_DIR   = "C:/Users/bg001/Desktop/Falcor/Results/test"
 IMPORTANCE_DIR = "C:/Users/bg001/Desktop/Falcor/Results/test"
-OUTPUT_DIR     = "C:/Users/bg001/Desktop/Falcor/Results/analysis"
+OUTPUT_DIR     = "C:/Users/bg001/Desktop/Falcor/Results/ROI_PSNR_analysis"
 
 # Falcor가 생성하는 실제 파일명 패턴 — NNNN은 4자리 프레임 번호
 # 캡처 후 Results 폴더 확인하여 맞게 수정

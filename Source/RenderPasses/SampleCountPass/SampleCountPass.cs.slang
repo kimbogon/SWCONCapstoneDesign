@@ -145,11 +145,17 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     gOutput[pixel] = count;
 
     // [디버그 시각화] 절대 sample count 를 히트맵으로 표현한다.
-    //   1spp → 파랑(0,0,1), 32spp → 빨강(1,0,0). 중간은 선형 보간.
-    //   t = (count - 1) / 31  :  1spp → 0.0,  32spp → 1.0
+    //   1spp → 파랑, 16spp → 빨강. 중간은 파랑→시안→초록→노랑→빨강 다단계 보간.
+    //   직접 파랑→빨강을 보간하면 중간값이 보라가 되므로, 초록·노랑을 거치도록 한다.
+    //   t = (count - 1) / 15  :  1spp → 0.0,  16spp → 1.0
 #if HAS_SAMPLE_COUNT_VIS
-    float t = saturate(float(count - 1u) / 31.f);
-    float3 heatCol = lerp(float3(0.f, 0.f, 1.f), float3(1.f, 0.f, 0.f), t); // 파랑 → 빨강
+    float t = saturate(float(count - 1u) / 15.f);
+    float u = t * 4.f;  // [0,1] 을 4개 구간으로 분할
+    float3 heatCol;
+    if      (u < 1.f) heatCol = lerp(float3(0,0,1), float3(0,1,1), u);        // 파랑 → 시안
+    else if (u < 2.f) heatCol = lerp(float3(0,1,1), float3(0,1,0), u - 1.f);  // 시안 → 초록
+    else if (u < 3.f) heatCol = lerp(float3(0,1,0), float3(1,1,0), u - 2.f);  // 초록 → 노랑
+    else              heatCol = lerp(float3(1,1,0), float3(1,0,0), u - 3.f);  // 노랑 → 빨강
     gSampleCountVis[pixel] = float4(heatCol, 1.f);
 #endif
 }
