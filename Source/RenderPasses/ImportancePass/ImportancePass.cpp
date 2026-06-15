@@ -123,9 +123,6 @@ void ImportancePass::readbackCenterCategory()
 void ImportancePass::updateTaskState(float dt)
 {
     // 1) Camera-movement detection via camera position comparison
-    //    ViewProj 행렬은 위치뿐 아니라 방향(회전) 변화에도 바뀌므로,
-    //    회전만 했을 때에도 Steering 이 활성화되던 문제가 있었다.
-    //    위치 변화만 반영하기 위해 카메라의 월드 위치만 비교한다.
     bool camMoved = false;
     if (mpScene && mpScene->getCamera())
     {
@@ -141,11 +138,8 @@ void ImportancePass::updateTaskState(float dt)
     mCameraMoved = camMoved;
 
     // 2) Accumulate hold timers
-    // const bool wasdDown    = mKeyW || mKeyA || mKeyS || mKeyD;
-    // if (wasdDown) mSteerHold += dt; else mSteerHold = 0.f;
     if (camMoved) mSteerHold += dt; else mSteerHold = 0.f;
 
-    // const bool stillCam    = !camMoved;
     const bool enemyCenter = (mCenterCategory == 1u);
     const bool itemCenter  = (mCenterCategory == 2u);
 

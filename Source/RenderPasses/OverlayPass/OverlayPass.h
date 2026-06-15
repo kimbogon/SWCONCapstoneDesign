@@ -11,7 +11,7 @@ public:
     FALCOR_PLUGIN_CLASS(
         OverlayPass,
         "OverlayPass",
-        "화면 중앙에 크로스헤어를 그리는 오버레이 패스."
+        "Renders a crosshair in the center of the screen."
     );
 
     static ref<OverlayPass> create(ref<Device> pDevice, const Properties& props)

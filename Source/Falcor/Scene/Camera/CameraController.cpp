@@ -319,9 +319,9 @@ namespace Falcor
                 float3 viewDir = normalize(camTarget - camPos);
                 float3 sideway = cross(viewDir, normalize(camUp));
 
-                // ↓ 이 두 줄을 추가
-                float3 flatViewDir = normalize(float3(viewDir.x, 0.f, viewDir.z)); // Y성분 제거
-                float3 flatSideway = normalize(float3(sideway.x, 0.f, sideway.z)); // Y성분 제거
+                // 카메라가 위아래로 움직이지 않도록 Y성분 제거
+                float3 flatViewDir = normalize(float3(viewDir.x, 0.f, viewDir.z)); 
+                float3 flatSideway = normalize(float3(sideway.x, 0.f, sideway.z)); 
 
                 float curMove = mSpeedModifier * mSpeed * elapsedTime;
                 camPos += movement.z * curMove * flatViewDir; // viewDir → flatViewDir

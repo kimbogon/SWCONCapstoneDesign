@@ -1,8 +1,6 @@
 /***************************************************************************
  # SampleCountPass.h
  #
- # [변경 내용] 고정 임계값 방식(thresholdLow / thresholdHigh) 제거.
- # 대신 평균 중요도(Avg_Imp) 기반 샘플 분배로 교체.
  #
  # 알고리즘:
  #   S_p = clamp(round(I_p / Avg_Imp * sTarget), 1, maxSamples)

@@ -1,5 +1,5 @@
 """
-analyze_frame_time.py — 1.2 frame time 측정 및 보고
+analyze_frame_time.py — frame time 측정 및 보고
 
 [원리]
   각 시나리오 디렉터리에서 캡처된 6장의 EXR 파일을 프레임 번호 순으로 정렬하고,
@@ -196,7 +196,8 @@ try:
         vals = [means.get((pipe, sc), 0.0) for sc in scenarios]
         errs = [stds.get((pipe, sc),  0.0) for sc in scenarios]
         bars = ax.bar(x + (i - 0.5) * width, vals, width,
-                      label=pipe, color=colors[pipe], alpha=0.85,
+                      label={"Baseline": "Baseline(PathTracer)", "Adaptive": "IAPathTracer"}[pipe],
+                      color=colors[pipe], alpha=0.85,
                       yerr=errs, capsize=5, error_kw={"elinewidth": 1.5})
         for bar, v, e in zip(bars, vals, errs):
             if v > 0:
@@ -206,7 +207,7 @@ try:
 
     ax.set_xlabel("Scenario")
     ax.set_ylabel("Mean Frame Time (ms)")
-    ax.set_title("Frame Time Comparison: Baseline vs Adaptive\n"
+    ax.set_title("Frame Time Comparison: Baseline(PathTracer) vs IAPathTracer\n"
                  "(error bars = ±1 std, 5 intervals × 500 frames per condition)")
     ax.set_xticks(x)
     ax.set_xticklabels(scenarios)

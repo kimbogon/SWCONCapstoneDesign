@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ROI PSNR/MSE 측정 스크립트 (요구사항 1.3 - 4~5단계)
+ROI PSNR/MSE 측정 스크립트 (요구사항 - 4~5단계)
 
 사용 전 확인사항:
   - PathTracerAdaptive.py에 ImportancePass.importance markOutput 추가 후 재캡처
@@ -234,33 +234,27 @@ def main():
     print(f"[저장] {csv_path}")
 
     # ── 시각화 ──────────────────────────────────
-    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
-    fig.suptitle(f"ROI vs Full-Frame PSNR/MSE  (threshold={THRESHOLD})", fontsize=13)
+    # 서브플롯 순서: Full PSNR → ROI PSNR → ROI Size
+    fig, axes = plt.subplots(3, 1, figsize=(12, 12))
+    fig.suptitle(f"ROI vs Full-Frame PSNR  (task = Pointing, threshold={THRESHOLD})", fontsize=13)  # ← 전체 제목은 여기서 수정
     x = df['frame']
 
-    # ROI PSNR
-    ax = axes[0, 0]
-    ax.plot(x, df['roi_base_psnr'], label='Baseline', color='steelblue', lw=1.5)
-    ax.plot(x, df['roi_adap_psnr'], label='Adaptive',  color='tomato',   lw=1.5)
-    ax.set_title('ROI PSNR (dB)');       ax.set_xlabel('Frame'); ax.set_ylabel('dB')
-    ax.legend(); ax.grid(alpha=0.3)
-
     # Full-Frame PSNR
-    ax = axes[0, 1]
-    ax.plot(x, df['full_base_psnr'], label='Baseline', color='steelblue', lw=1.5, ls='--')
-    ax.plot(x, df['full_adap_psnr'], label='Adaptive',  color='tomato',   lw=1.5, ls='--')
+    ax = axes[0]
+    ax.plot(x, df['full_base_psnr'], label='Baseline(PathTracer)', color='steelblue', lw=1.5, ls='--')
+    ax.plot(x, df['full_adap_psnr'], label='IAPathTracer',          color='tomato',   lw=1.5, ls='--')
     ax.set_title('Full-Frame PSNR (dB)'); ax.set_xlabel('Frame'); ax.set_ylabel('dB')
     ax.legend(); ax.grid(alpha=0.3)
 
-    # ROI MSE
-    ax = axes[1, 0]
-    ax.plot(x, df['roi_base_mse'], label='Baseline', color='steelblue', lw=1.5)
-    ax.plot(x, df['roi_adap_mse'], label='Adaptive',  color='tomato',   lw=1.5)
-    ax.set_title('ROI MSE');             ax.set_xlabel('Frame'); ax.set_ylabel('MSE')
+    # ROI PSNR
+    ax = axes[1]
+    ax.plot(x, df['roi_base_psnr'], label='Baseline(PathTracer)', color='steelblue', lw=1.5)
+    ax.plot(x, df['roi_adap_psnr'], label='IAPathTracer',          color='tomato',   lw=1.5)
+    ax.set_title('ROI PSNR (dB)'); ax.set_xlabel('Frame'); ax.set_ylabel('dB')
     ax.legend(); ax.grid(alpha=0.3)
 
-    # ROI size
-    ax = axes[1, 1]
+    # ROI Size
+    ax = axes[2]
     ax.plot(x, df['roi_ratio_pct'], color='gray', lw=1.5)
     ax.set_title('ROI Size (% of Total Pixels)'); ax.set_xlabel('Frame'); ax.set_ylabel('%')
     ax.grid(alpha=0.3)
@@ -273,18 +267,26 @@ def main():
 
     # ── 요약 통계 출력 ───────────────────────────
     print("\n=== 평균 지표 ===")
-    cols = [
-        ('ROI  PSNR  Baseline', 'roi_base_psnr'),
-        ('ROI  PSNR  Adaptive', 'roi_adap_psnr'),
-        ('Full PSNR  Baseline', 'full_base_psnr'),
-        ('Full PSNR  Adaptive', 'full_adap_psnr'),
-        ('ROI  MSE   Baseline', 'roi_base_mse'),
-        ('ROI  MSE   Adaptive', 'roi_adap_mse'),
+    # Full PSNR
+    cols_full = [
+        ('Full PSNR  Baseline(PathTracer)', 'full_base_psnr'),
+        ('Full PSNR  IAPathTracer',          'full_adap_psnr'),
     ]
-    for label, col in cols:
+    for label, col in cols_full:
         val = df[col].replace([float('inf')], np.nan).mean()
-        print(f"  {label}: {val:.4f}")
-    print(f"  ROI 비율 평균    : {df['roi_ratio_pct'].mean():.1f}%")
+        print(f"  {label}: {val:.4f} dB")
+    # ROI PSNR (그래프에 표시된 지표)
+    print()
+    cols_roi_psnr = [
+        ('ROI  PSNR  Baseline(PathTracer)', 'roi_base_psnr'),
+        ('ROI  PSNR  IAPathTracer',          'roi_adap_psnr'),
+    ]
+    for label, col in cols_roi_psnr:
+        val = df[col].replace([float('inf')], np.nan).mean()
+        print(f"  {label}: {val:.4f} dB")
+    # ROI Size (그래프에 표시된 지표)
+    print()
+    print(f"  ROI Size 평균    : {df['roi_ratio_pct'].mean():.1f}%")
 
 
 if __name__ == "__main__":

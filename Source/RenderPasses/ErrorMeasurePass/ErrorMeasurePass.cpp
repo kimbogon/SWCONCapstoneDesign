@@ -62,7 +62,7 @@ const std::filesystem::path kDefaultCameraRecordPath = "C:/Users/bg001/Desktop/F
 const bool kAutoStartCameraRecord = false;
 
 
-// [요구사항 5-3] MSE=0 시 PSNR 상한 클램프 값 (inf 방지)
+// MSE=0 시 PSNR 상한 클램프 값 (inf 방지)
 constexpr float kPSNRMax = 999.0f;
 // MSE가 이 값 이하면 최대 PSNR을 반환 (division-by-zero 방지)
 constexpr float kMSEMinThreshold = 1e-10f;
@@ -139,7 +139,7 @@ RenderPassReflection ErrorMeasurePass::reflect(const CompileData& compileData)
     RenderPassReflection reflector;
     reflector.addInput(kInputChannelSourceImage, "Source image");
     reflector.addInput(kInputChannelReferenceImage, "Reference image (optional)").flags(RenderPassReflection::Field::Flags::Optional);
-    // [요구사항 5-2] WorldPosition은 Optional: 없어도 크래시 없이 동작
+    // WorldPosition은 Optional: 없어도 크래시 없이 동작
     reflector.addInput(kInputChannelWorldPosition, "World-space position").flags(RenderPassReflection::Field::Flags::Optional);
     reflector.addOutput(kOutputChannelImage, "Output image").format(ResourceFormat::RGBA32Float);
     return reflector;
@@ -178,7 +178,7 @@ void ErrorMeasurePass::execute(RenderContext* pRenderContext, const RenderData& 
         return;
     }
 
-    // [요구사항 5-1] Reference 와 Source 해상도 불일치 시 처리
+    // Reference 와 Source 해상도 불일치 시 처리
     // Reference 크기가 Source 와 다른 경우, 경고 로그를 남기고 Source 를 그대로 출력한다.
     // (blit 으로 스케일 복사하는 방식도 가능하나, 오차 지표가 왜곡되므로 스킵이 더 안전)
     {
@@ -223,7 +223,7 @@ void ErrorMeasurePass::runDifferencePass(RenderContext* pRenderContext, const Re
     // Bind textures.
     ref<Texture> pSourceTexture = renderData.getTexture(kInputChannelSourceImage);
 
-    // [요구사항 5-2] WorldPosition 이 없으면 nullptr 이 되고, 셰이더 측 gIgnoreBackground=0 으로 처리됨
+    // WorldPosition 이 없으면 nullptr 이 되고, 셰이더 측 gIgnoreBackground=0 으로 처리됨
     ref<Texture> pWorldPositionTexture = renderData.getTexture(kInputChannelWorldPosition);
 
     auto var = mpErrorMeasurerPass->getRootVar();
@@ -400,7 +400,7 @@ void ErrorMeasurePass::renderUI(Gui::Widgets& widget)
             << (mReportRunningError ? mRunningError.b : mMeasurements.error.b);
         widget.text(oss.str());
 
-        // [요구사항 3] PSNR 출력 (MSE 모드일 때만 의미 있는 값)
+        // PSNR 출력 (MSE 모드일 때만 의미 있는 값)
         if (mComputeSquaredDifference)
         {
             // MSE 값을 고정소수점으로 별도 표시
@@ -507,7 +507,7 @@ bool ErrorMeasurePass::loadMeasurementsFile()
     }
     else
     {
-        // [요구사항 4] CSV 헤더에 psnr 컬럼 추가 (frame, mse, psnr 순서)
+        // CSV 헤더에 psnr 컬럼 추가 (frame, mse, psnr 순서)
         if (mComputeSquaredDifference)
         {
             mMeasurementsFile << "frame,avg_L2_error,red_L2_error,green_L2_error,blue_L2_error,psnr" << std::endl;
@@ -529,7 +529,7 @@ void ErrorMeasurePass::saveMeasurementsToFile()
 
     FALCOR_ASSERT(mMeasurements.valid);
 
-    // [요구사항 4] frame 카운터, MSE, RGB 오차, PSNR 순서로 기록
+    // frame 카운터, MSE, RGB 오차, PSNR 순서로 기록
     mMeasurementsFile << mFrameIndex << ",";
     mMeasurementsFile << mMeasurements.avgError << ",";
     mMeasurementsFile << mMeasurements.error.r << ","

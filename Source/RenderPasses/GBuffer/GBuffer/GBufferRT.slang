@@ -326,8 +326,8 @@ struct GBufferRT
         float disocclusion = 0.f;
         ITextureSampler lod = ExplicitLodTextureSampler(0.f);
 
-        // [ObjectID] hit から instanceID を取得するための変数
-        // GeometryInstanceID.index が mesh instance 固有番号になる
+        // [ObjectID] hit에서 instanceID를 가져오기 위한 변수
+        // GeometryInstanceID.index가 mesh instance 고유 번호가 된다.
         uint objectID = 0;
 
         if (hit.getType() == HitType::Triangle)
@@ -335,8 +335,8 @@ struct GBufferRT
             const TriangleHit triangleHit = hit.getTriangleHit();
 
             materialID = gScene.getMaterialID(triangleHit.instanceID);
-            // [ObjectID] TriangleHit の instanceID.index を object ID として使用する.
-            // これは material ID とは独立しており、同じ material を持つ別の mesh instance でも異なる値になる.
+            // [ObjectID] TriangleHit의 instanceID.index를 object ID로 사용한다.
+            // material ID와 독립적이며, 같은 material을 가진 다른 mesh instance도 서로 다른 값이 된다.
             objectID   = triangleHit.instanceID.index;
             v = gScene.getVertexData(triangleHit);
             prevPosW = gScene.getPrevPosW(triangleHit);

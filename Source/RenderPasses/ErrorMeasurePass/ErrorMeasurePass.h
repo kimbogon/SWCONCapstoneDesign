@@ -84,7 +84,7 @@ private:
         float avgError; ///< Error averaged over color components.
         bool valid = false;
 
-        // [요구사항 2] PSNR 필드 추가
+        // PSNR 필드 추가
         // MSE 모드에서만 유효; L1 모드나 reference 없을 때는 -1.0f
         float psnr = -1.0f;
     } mMeasurements;
@@ -131,7 +131,7 @@ private:
     static inline const Gui::RadioButtonGroup sOutputSelectionButtonsSourceOnly = {{(uint32_t)OutputId::Source, "Source", true}};
 
     // private 멤버 변수 섹션에 추가
-    uint32_t mFrameIndex = 0; ///< CSV 기록용 프레임 카운터 [요구사항 4]
+    uint32_t mFrameIndex = 0; ///< CSV 기록용 프레임 카운터
     uint32_t mCameraFrameIndex = 0; ///< 카메라 CSV 전용 프레임 카운터
 
     // 카메라 궤적 기록

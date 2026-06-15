@@ -32,7 +32,7 @@ def render_graph_AdaptivePathTracer():
     })
     g.addPass(SVGFPass, "SVGFPass")
 
-    # [요구사항 1] ErrorMeasurePass 추가: PSNR 기반 정량 평가를 위해 그래프에 통합
+    # ErrorMeasurePass 추가: PSNR 기반 정량 평가를 위해 그래프에 통합
     # ComputeSquaredDifference=True 로 MSE 모드 활성화, IgnoreBackground=True 로 배경 제외
     ErrorMeasurePass = createPass("ErrorMeasurePass", {
         'ComputeSquaredDifference': True,   # MSE(L2) 모드 사용

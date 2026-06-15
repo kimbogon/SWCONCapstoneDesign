@@ -1,9 +1,6 @@
 /***************************************************************************
  # SampleCountPass.cpp
  #
- # [변경 내용]
- # - 고정 임계값(thresholdLow / thresholdHigh) 제거.
- # - 3-pass dispatch 로 GPU Reduction → Avg_Imp → 픽셀별 샘플 수 계산.
  #
  # [3-pass dispatch 구조]
  #   1. reduceMain   : 타일별 importance 부분합 → gTilePartialSums
