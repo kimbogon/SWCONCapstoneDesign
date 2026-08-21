@@ -1,5 +1,15 @@
 from falcor import *
 
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+
+from Experiments import config
+_cfg = config.PRESETS[config.CURRENT_PRESET]["pyscene"]
+CAMERA_ANIMATION = _cfg["CAMERA_ANIMATION"]
+
 # ------------------------------------------------------------
 # 1. 메시 생성
 # ------------------------------------------------------------
@@ -184,8 +194,6 @@ sceneBuilder.addAnimation(enemyAnim)
 #   'pointing' — camera_pointing_steering.py 시나리오 재생
 #   'none'     — 카메라 애니메이션 없음
 # ============================================================
-CAMERA_ANIMATION = 'aiming'
-
 _up = float3(0, 1, 0)
 
 if CAMERA_ANIMATION == 'aiming':

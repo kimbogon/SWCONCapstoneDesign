@@ -1,6 +1,17 @@
 from falcor import *
 import os   # 캡처 폴더 자동 생성을 위해 추가
 
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+
+from Experiments import config
+_cfg = config.PRESETS[config.CURRENT_PRESET]["ref"]
+
+CAMERA_ANIMATION = _cfg["CAMERA_ANIMATION"]
+
 def render_graph_PathTracerBaseline():
     g = RenderGraph("PathTracerBaseline")
 
@@ -63,17 +74,21 @@ except NameError: None
 # ============================================================
 # 캡처 설정
 # ============================================================
-ENABLE_AUTO_CAPTURE = False   # False로 바꾸면 자동 캡처 비활성화
+ENABLE_AUTO_CAPTURE = _cfg["ENABLE_AUTO_CAPTURE"]
+CAMERA_ANIMATION = _cfg["CAMERA_ANIMATION"]
 CAPTURE_EVERY_N_FRAMES = 10   # 매 N프레임마다 캡처 (1 = 매 프레임)
 CAPTURE_TOTAL_FRAMES = 600   # 총 프레임 수
 FIXED_FRAMERATE = 60         # 카메라 애니메이션 고정 fps
 
-try:
-    m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/ROI_PSNR_analysis/reference"   # 절대 경로
-    os.makedirs(m.frameCapture.outputDir, exist_ok=True)   # 캡처 폴더가 없으면 생성
-    m.frameCapture.baseFilename = "ref"
+OUTPUT_BASE = "C:/Users/bg001/Desktop/SWCONCapstoneDesign/Experiments"
 
+try:
     if ENABLE_AUTO_CAPTURE:
+        output_dir = OUTPUT_BASE + "/PSNR/ref_" + CAMERA_ANIMATION
+        os.makedirs(output_dir, exist_ok=True)   # 캡처 폴더가 없으면 생성
+        m.frameCapture.outputDir    = output_dir
+        m.frameCapture.baseFilename = "ref"
+        
         m.clock.framerate = FIXED_FRAMERATE
         m.clock.time = 0        # 시각 리셋
         m.clock.frame = 0       # 프레임 카운터 리셋

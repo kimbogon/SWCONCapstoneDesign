@@ -1,0 +1,5 @@
+pipeline,scenario,mean_frame_time_ms,std_frame_time_ms,fps
+Baseline,Aiming,35.087,0.279,28.5
+Baseline,Pointing,35.709,0.489,28.0
+IAPathTracer,Aiming,40.602,0.013,24.6
+IAPathTracer,Pointing,40.661,0.039,24.6

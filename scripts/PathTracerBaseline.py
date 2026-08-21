@@ -1,6 +1,15 @@
 from falcor import *
 import os   # 캡처 폴더 자동 생성을 위해 추가
 
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+
+from Experiments import config
+_cfg = config.PRESETS[config.CURRENT_PRESET]["baseline"]
+
 def render_graph_PathTracerBaseline():
     g = RenderGraph("PathTracerBaseline")
 
@@ -63,17 +72,21 @@ except NameError: None
 # ============================================================
 # 캡처 설정
 # ============================================================
-ENABLE_AUTO_CAPTURE = False   # False로 바꾸면 자동 캡처 비활성화
+ENABLE_AUTO_CAPTURE = _cfg["ENABLE_AUTO_CAPTURE"]
+CAMERA_ANIMATION = _cfg["CAMERA_ANIMATION"]
 CAPTURE_EVERY_N_FRAMES = 10   # 매 N프레임마다 캡처 (1 = 매 프레임)
 CAPTURE_TOTAL_FRAMES = 600   # 총 프레임 수
 FIXED_FRAMERATE = 60         # 카메라 애니메이션 고정 fps
 
-try:
-    m.frameCapture.outputDir = "C:/Users/bg001/Desktop/Falcor/Results/ROI_PSNR_analysis/baseline"   # 절대 경로
-    os.makedirs(m.frameCapture.outputDir, exist_ok=True)   # 캡처 폴더가 없으면 생성
-    m.frameCapture.baseFilename = "base"
+OUTPUT_BASE = "C:/Users/bg001/Desktop/SWCONCapstoneDesign/Experiments"
 
+try:
     if ENABLE_AUTO_CAPTURE:
+        output_dir = OUTPUT_BASE + "/PSNR/baseline_" + CAMERA_ANIMATION
+        os.makedirs(output_dir, exist_ok=True)   # 캡처 폴더가 없으면 생성
+        m.frameCapture.outputDir    = output_dir
+        m.frameCapture.baseFilename = "baseline"
+        
         m.clock.framerate = FIXED_FRAMERATE
         m.clock.time = 0        # 시각 리셋
         m.clock.frame = 0       # 프레임 카운터 리셋
@@ -95,26 +108,19 @@ except NameError:
 #        각 구간 = mtime 차이 / 500 → 5개 값으로 mean ± std 산출.
 #        구간 끝 캡처 스톨은 다음 구간 시작점에서 상쇄되므로 구간 내 오차 ~13%.
 # ============================================================
-ENABLE_FRAMETIME_MEASUREMENT = False   # True로 바꾸면 타이밍 측정 활성화
-
+ENABLE_FRAMETIME_MEASUREMENT = _cfg["ENABLE_FRAMETIME_MEASUREMENT"]
 WARMUP_FRAMES   = 100   # 초기 오버헤드 제외용 워밍업 프레임 수
 MEASURE_FRAMES  = 500   # 구간당 프레임 수
 NUM_INTERVALS   = 5     # 구간 수 (캡처 파일 = NUM_INTERVALS + 1 = 6장)
-
-# 시나리오에 따라 변경: "aiming" 또는 "pointing"
-SCENARIO = "aiming"
-#SCENARIO = "pointing"
-
-OUTPUT_BASE = "C:/Users/bg001/Desktop/Falcor/Results/frame_time_analysis"
 
 try:
     if ENABLE_FRAMETIME_MEASUREMENT:
         # outputDir/baseFilename 설정을 if 블록 안으로 이동:
         # 비활성화 시 위 '캡처 설정'의 출력 경로/파일명을 덮어쓰지 않도록 함
-        output_dir = OUTPUT_BASE + "/baseline_" + SCENARIO
+        output_dir = OUTPUT_BASE + "/frame_time/baseline_" + CAMERA_ANIMATION
         os.makedirs(output_dir, exist_ok=True)   # 캡처 폴더가 없으면 생성
         m.frameCapture.outputDir    = output_dir
-        m.frameCapture.baseFilename = "timing_base"
+        m.frameCapture.baseFilename = "baseline"
 
         # m.clock.frame은 read-only라 리셋 불가 → 현재값 기준 절대 프레임 번호 계산
         base = m.clock.frame
@@ -127,4 +133,3 @@ try:
 
 except NameError:
     None
-
